@@ -4,15 +4,17 @@
     ops::DerefMut,
     pin::Pin,
 };
+
 use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
 
+/// Buffer owner that will lend the slice for writing.
 pub trait TrBuffWriter<T: Clone = u8> {
     type BuffMut<'a>: DerefMut<Target = [T]> where Self: 'a;
 
-    type Error;
+    type Err;
 
     type WriteAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffMut<'a>, Self::Error>>
+        Result<Self::BuffMut<'a>, Self::Err>>
     where
         Self: 'a;
 
@@ -21,13 +23,13 @@ pub trait TrBuffWriter<T: Clone = u8> {
     fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
 }
 
-
+/// A dummy writer as placeholder in generic types.
 pub struct DisabledBuffWriter<T: Clone>(PhantomData<[T; 0]>);
 
 impl<T: Clone> TrBuffWriter<T> for DisabledBuffWriter<T> {
     type BuffMut<'a> = &'a mut [T] where Self: 'a;
 
-    type Error = ();
+    type Err = ();
 
     type WriteAsync<'a> = WriteAsync<'a, T> where Self: 'a;
 

@@ -10,16 +10,10 @@ extern crate std;
 mod peeker_;
 mod reader_;
 mod writer_;
-mod reclaim_;
-
-pub mod utils;
 
 pub use peeker_::{DisabledBuffPeeker, TrBuffPeeker};
 pub use reader_::{DisabledBuffReader, TrBuffReader};
 pub use writer_::{DisabledBuffWriter, TrBuffWriter};
-pub use reclaim_::{
-    IoSliceRef, IoSliceMut, NoReclaim, TrReclaimIoSliceRef, TrReclaimIoSliceMut,
-};
 
 pub mod x_deps {
     pub use abs_sync;

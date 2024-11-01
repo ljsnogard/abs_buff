@@ -4,35 +4,32 @@
     ops::Deref,
     pin::Pin,
 };
+
 use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
 
-use crate::utils::{ReaderAsChunkFiller, TrChunkFiller};
-
+/// Buffer owner that will lend slice of buffer for reading.
 pub trait TrBuffReader<T: Clone = u8> {
     type BuffRef<'a>: Deref<Target = [T]> where Self: 'a;
 
-    type Error;
+    type Err;
 
     type ReadAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffRef<'a>, Self::Error>>
+        Result<Self::BuffRef<'a>, Self::Err>>
     where
         Self: 'a;
 
     fn can_read(&mut self) -> bool;
 
     fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
-
-    fn as_filler(&mut self) -> impl TrChunkFiller<T> where Self: Sized {
-        ReaderAsChunkFiller::<&mut Self, Self, T>::new(self)
-    }
 }
 
+/// A dummy reader as a placeholder in generic types.
 pub struct DisabledBuffReader<T: Clone>(PhantomData<[T; 0]>);
 
 impl<T: Clone> TrBuffReader<T> for DisabledBuffReader<T> {
     type BuffRef<'a> = &'a [T] where Self: 'a;
 
-    type Error = ();
+    type Err = ();
 
     type ReadAsync<'a> = ReadAsync<'a, T> where Self: 'a;
 

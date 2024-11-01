@@ -4,35 +4,32 @@
     ops::Deref,
     pin::Pin,
 };
+
 use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
 
-use crate::utils::{PeekerAsChunkFiller, TrChunkFiller};
-
+/// Buffer owner that will lend slice for peeking (without moving cursor).
 pub trait TrBuffPeeker<T: Clone = u8> {
     type BuffRef<'a>: Deref<Target = [T]> where Self: 'a;
 
-    type Error;
+    type Err;
 
     type PeekAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffRef<'a>, Self::Error>>
+        Result<Self::BuffRef<'a>, Self::Err>>
     where
         Self: 'a;
 
     fn can_peek(&mut self, skip: usize) -> bool;
 
     fn peek_async(&mut self, skip: usize) -> Self::PeekAsync<'_>;
-
-    fn as_filler(&mut self) -> impl TrChunkFiller<T> where Self: Sized {
-        PeekerAsChunkFiller::<&mut Self, Self, T>::new(self)
-    }
 }
 
+/// A dummy peeker as a placeholder in generic types.
 pub struct DisabledBuffPeeker<T: Clone>(PhantomData<[T; 0]>);
 
 impl<T: Clone> TrBuffPeeker<T> for DisabledBuffPeeker<T> {
     type BuffRef<'a> = &'a [T] where Self: 'a;
 
-    type Error = ();
+    type Err = ();
 
     type PeekAsync<'a> = PeekAsync<'a, T> where Self: 'a;
 
