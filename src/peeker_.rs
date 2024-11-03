@@ -20,7 +20,7 @@ where
     where
         Self: 'a;
 
-    /// Lend some slices with skip size for peeking, the length of the slices
+    /// Lend some slices for peeking. The number and the length of the slices 
     /// to peek are decided by the buffer.
-    fn peek_async(&mut self, skip: usize) -> Self::PeekAsync<'_>;
+    fn peek_async(&mut self) -> Self::PeekAsync<'_>;
 }

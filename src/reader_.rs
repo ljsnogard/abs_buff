@@ -16,6 +16,7 @@ where
     where
         Self: 'a;
 
-    /// Lend some slices with given max length for reading.
+    /// Lend some slices for reading. The total length of these slices will be
+    /// no greater than the length given in the argument.
     fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
 }

@@ -16,6 +16,7 @@ where
     where
         Self: 'a;
 
-    /// Lend some slices with the given max length for writing.
+    /// Lend some slices for writing. The total length of these slices will be
+    /// no greater than the length given in the argument.
     fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
 }
