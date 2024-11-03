@@ -1,4 +1,8 @@
-﻿use core::{iter::IntoIterator, ops::Deref};
+﻿use core::{
+    error::Error,
+    iter::IntoIterator,
+    ops::Deref,
+};
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 

@@ -1,4 +1,6 @@
 use core::{
+    error::Error,
+    fmt,
     future::{self, Future, IntoFuture, Ready},
     marker::PhantomData,
     pin::Pin,
@@ -38,11 +40,11 @@ where
 {
     type SliceRef<'a> = &'a [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceRef<'a>; 0] where Self: 'a;
-    type Err = ();
+    type Err = EmptyBuffIterError;
 
     type PeekAsync<'a> = DisabledPeekAsync<'a, T> where Self: 'a;
 
-    fn peek_async(&mut self, _: usize) -> Self::PeekAsync<'_> {
+    fn peek_async(&mut self) -> Self::PeekAsync<'_> {
         DisabledPeekAsync::new()
     }
 }
@@ -53,7 +55,7 @@ where
 {
     type SliceRef<'a> = &'a [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceRef<'a>; 0] where Self: 'a;
-    type Err = ();
+    type Err = EmptyBuffIterError;
 
     type ReadAsync<'a> = DisabledReadAsync<'a, T> where Self: 'a;
 
@@ -68,12 +70,24 @@ where
 {
     type SliceMut<'a> = &'a mut [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceMut<'a>; 0] where Self: 'a;
-    type Err = ();
+    type Err = EmptyBuffIterError;
 
     type WriteAsync<'a> = DisabledWriteAsync<'a, T> where Self: 'a;
 
     fn write_async(&mut self, _: usize) -> Self::WriteAsync<'_> {
         DisabledWriteAsync::new()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EmptyBuffIterError;
+
+impl Error for EmptyBuffIterError
+{}
+
+impl fmt::Display for EmptyBuffIterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EmptyBuffIterError")
     }
 }
 
@@ -95,10 +109,10 @@ where
     T: Clone,
 {
     type IntoFuture = Ready<Self::Output>;
-    type Output = Result<[&'a [T]; 0], ()>;
+    type Output = Result<[&'a [T]; 0], EmptyBuffIterError>;
 
     fn into_future(self) -> Self::IntoFuture {
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
 
@@ -116,7 +130,7 @@ where
         C: TrCancellationToken,
     {
         let _ = cancel;
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
 
@@ -138,10 +152,10 @@ where
     T: Clone,
 {
     type IntoFuture = Ready<Self::Output>;
-    type Output = Result<[&'a [T]; 0], ()>;
+    type Output = Result<[&'a [T]; 0], EmptyBuffIterError>;
 
     fn into_future(self) -> Self::IntoFuture {
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
 
@@ -159,7 +173,7 @@ where
         C: TrCancellationToken,
     {
         let _ = cancel;
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
 
@@ -181,10 +195,10 @@ where
     T: Clone,
 {
     type IntoFuture = Ready<Self::Output>;
-    type Output = Result<[&'a mut [T]; 0], ()>;
+    type Output = Result<[&'a mut [T]; 0], EmptyBuffIterError>;
 
     fn into_future(self) -> Self::IntoFuture {
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
 
@@ -202,6 +216,6 @@ where
         C: TrCancellationToken,
     {
         let _ = cancel;
-        future::ready(Result::Err(()))
+        future::ready(Result::Err(EmptyBuffIterError))
     }
 }
