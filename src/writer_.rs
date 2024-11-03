@@ -1,77 +1,21 @@
-﻿use core::{
-    future::{self, Future, IntoFuture, Ready},
-    marker::PhantomData,
-    ops::DerefMut,
-    pin::Pin,
-};
+﻿use core::{iter::IntoIterator, ops::DerefMut};
 
-use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
+use abs_sync::cancellation::TrIntoFutureMayCancel;
 
-/// Buffer owner that will lend the slice for writing.
-pub trait TrBuffWriter<T: Clone = u8> {
-    type BuffMut<'a>: DerefMut<Target = [T]> where Self: 'a;
-
-    type Err;
+/// Buffer that will lend zero or more slices for writing (and update cursor)
+pub trait TrBuffIterWrite<T = u8>
+where
+    T: Clone,
+{
+    type SliceMut<'a>: DerefMut<Target = [T]> where Self: 'a;
+    type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>> where Self: 'a;
+    type Err: Error;
 
     type WriteAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffMut<'a>, Self::Err>>
+        Result<Self::BuffIter<'a>, Self::Err>>
     where
         Self: 'a;
 
-    fn can_write(&mut self) -> bool;
-
+    /// Lend some slices with the given max length for writing.
     fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
-}
-
-/// A dummy writer as placeholder in generic types.
-pub struct DisabledBuffWriter<T: Clone>(PhantomData<[T; 0]>);
-
-impl<T: Clone> TrBuffWriter<T> for DisabledBuffWriter<T> {
-    type BuffMut<'a> = &'a mut [T] where Self: 'a;
-
-    type Err = ();
-
-    type WriteAsync<'a> = WriteAsync<'a, T> where Self: 'a;
-
-    fn can_write(&mut self) -> bool {
-        false
-    }
-
-    fn write_async(&mut self, _: usize) -> Self::WriteAsync<'_> {
-        self::WriteAsync::new()
-    }
-}
-
-pub struct WriteAsync<'a, T>(PhantomData<&'a mut DisabledBuffWriter<T>>)
-where
-    T: Clone;
-
-impl<'a, T: Clone> WriteAsync<'a, T> {
-    fn new() -> Self {
-        WriteAsync(PhantomData)
-    }
-}
-
-impl<'a, T: Clone> IntoFuture for WriteAsync<'a, T> {
-    type IntoFuture = Ready<Self::Output>;
-    type Output = Result<&'a mut [T], ()>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        future::ready(Result::Err(()))
-    }
-}
-
-impl<'a, T: Clone> TrIntoFutureMayCancel<'a> for WriteAsync<'a, T> {
-    type MayCancelOutput = <<Self as IntoFuture>::IntoFuture as Future>::Output;
-
-    fn may_cancel_with<C>(
-        self,
-        cancel: Pin<&'a mut C>,
-    ) -> impl Future<Output = Self::MayCancelOutput>
-    where
-        C: TrCancellationToken,
-    {
-        let _ = cancel;
-        future::ready(Result::Err(()))
-    }
 }

@@ -1,13 +1,13 @@
 ﻿[package]
 name = "abs_buff"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 
 authors = ["lino <lino_snsalias@outlook.com>"]
 description = "ABStraction of BUFFered IO"
 homepage = "https://github.com/ljsnogard/abs_buff"
-keywords = ["IO", "buffer"]
-categories = ["no-std", "traits"]
+keywords = ["IO", "buffer", "traits"]
+categories = ["no-std"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
 

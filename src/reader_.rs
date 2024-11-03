@@ -1,75 +1,21 @@
-﻿use core::{
-    future::{self, Future, IntoFuture, Ready},
-    marker::PhantomData,
-    ops::Deref,
-    pin::Pin,
-};
+﻿use core::{iter::IntoIterator, ops::Deref};
 
-use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
+use abs_sync::cancellation::TrIntoFutureMayCancel;
 
-/// Buffer owner that will lend slice of buffer for reading.
-pub trait TrBuffReader<T: Clone = u8> {
-    type BuffRef<'a>: Deref<Target = [T]> where Self: 'a;
-
-    type Err;
+/// Buffer that will lend zero or more slices for reading (and update cursor)
+pub trait TrBuffIterRead<T = u8>
+where
+    T: Clone,
+{
+    type SliceRef<'a>: Deref<Target = [T]> where Self: 'a;
+    type BuffIter<'a>: IntoIterator<Item = Self::SliceRef<'a>> where Self: 'a;
+    type Err: Error;
 
     type ReadAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffRef<'a>, Self::Err>>
+        Result<Self::BuffIter<'a>, Self::Err>>
     where
         Self: 'a;
 
-    fn can_read(&mut self) -> bool;
-
+    /// Lend some slices with given max length for reading.
     fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
-}
-
-/// A dummy reader as a placeholder in generic types.
-pub struct DisabledBuffReader<T: Clone>(PhantomData<[T; 0]>);
-
-impl<T: Clone> TrBuffReader<T> for DisabledBuffReader<T> {
-    type BuffRef<'a> = &'a [T] where Self: 'a;
-
-    type Err = ();
-
-    type ReadAsync<'a> = ReadAsync<'a, T> where Self: 'a;
-
-    fn can_read(&mut self) -> bool {
-        false
-    }
-
-    fn read_async(&mut self, _: usize) -> Self::ReadAsync<'_> {
-        self::ReadAsync::new()
-    }
-}
-
-pub struct ReadAsync<'a, T: Clone>(PhantomData<&'a mut DisabledBuffReader<T>>);
-
-impl<'a, T: Clone> ReadAsync<'a, T> {
-    fn new() -> Self {
-        ReadAsync(PhantomData)
-    }
-}
-
-impl<'a, T: Clone> IntoFuture for ReadAsync<'a, T> {
-    type IntoFuture = Ready<Self::Output>;
-    type Output = Result<&'a [T], ()>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        future::ready(Result::Err(()))
-    }
-}
-
-impl<'a, T: Clone> TrIntoFutureMayCancel<'a> for ReadAsync<'a, T> {
-    type MayCancelOutput = <<Self as IntoFuture>::IntoFuture as Future>::Output;
-
-    fn may_cancel_with<C>(
-        self,
-        cancel: Pin<&'a mut C>,
-    ) -> impl Future<Output = Self::MayCancelOutput>
-    where
-        C: TrCancellationToken,
-    {
-        let _ = cancel;
-        future::ready(Result::Err(()))
-    }
 }
