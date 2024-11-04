@@ -24,3 +24,13 @@ where
     /// no greater than the length given in the argument.
     fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
 }
+
+pub trait TrBuffIterTryRead<T = u8>: TrBuffIterRead<T>
+where
+    T: Clone,
+{
+    fn try_read(
+        &mut self,
+        length: usize,
+    ) -> Result<Self::BuffIter<'_>, Self::Err>;
+}

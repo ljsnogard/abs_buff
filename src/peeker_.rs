@@ -24,3 +24,10 @@ where
     /// to peek are decided by the buffer.
     fn peek_async(&mut self) -> Self::PeekAsync<'_>;
 }
+
+pub trait TrBuffIterTryPeek<T = u8>: TrBuffIterPeek<T>
+where
+    T: Clone,
+{
+    fn try_peek(&mut self) -> Result<Self::BuffIter<'_>, Self::Err>;
+}

@@ -8,7 +8,10 @@ use core::{
 
 use abs_sync::cancellation::{TrCancellationToken, TrIntoFutureMayCancel};
 
-use crate::{TrBuffIterPeek, TrBuffIterRead, TrBuffIterWrite};
+use crate::{
+    TrBuffIterPeek, TrBuffIterRead, TrBuffIterWrite, TrBuffIterTryPeek,
+    TrBuffIterTryRead, TrBuffIterTryWrite,
+};
 
 /// A placeholder type of buffer that will not lend any slices.
 pub struct EmptyBuffIter<T>(PhantomData<[T; 0]>)
@@ -49,6 +52,15 @@ where
     }
 }
 
+impl<T> TrBuffIterTryPeek<T> for EmptyBuffIter<T>
+where
+    T: Clone,
+{
+    fn try_peek(&mut self) -> Result<Self::BuffIter<'_>, Self::Err> {
+        Result::Err(EmptyBuffIterError)
+    }
+}
+
 impl<T> TrBuffIterRead<T> for EmptyBuffIter<T>
 where
     T: Clone,
@@ -64,6 +76,15 @@ where
     }
 }
 
+impl<T> TrBuffIterTryRead<T> for EmptyBuffIter<T>
+where
+    T: Clone,
+{
+    fn try_read(&mut self, _: usize) -> Result<Self::BuffIter<'_>, Self::Err> {
+        Result::Err(EmptyBuffIterError)
+    }
+}
+
 impl<T> TrBuffIterWrite<T> for EmptyBuffIter<T>
 where
     T: Clone,
@@ -76,6 +97,15 @@ where
 
     fn write_async(&mut self, _: usize) -> Self::WriteAsync<'_> {
         DisabledWriteAsync::new()
+    }
+}
+
+impl<T> TrBuffIterTryWrite<T> for EmptyBuffIter<T>
+where
+    T: Clone,
+{
+    fn try_write(&mut self, _: usize) -> Result<Self::BuffIter<'_>, Self::Err> {
+        Result::Err(EmptyBuffIterError)
     }
 }
 

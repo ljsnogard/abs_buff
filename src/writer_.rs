@@ -24,3 +24,13 @@ where
     /// no greater than the length given in the argument.
     fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
 }
+
+pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T>
+where
+    T: Clone,
+{
+    fn try_write(
+        &mut self,
+        length: usize,
+    ) -> Result<Self::BuffIter<'_>, Self::Err>;
+}
