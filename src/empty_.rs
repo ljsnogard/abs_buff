@@ -125,7 +125,7 @@ pub struct DisabledPeekAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
 where
     T: Clone;
 
-impl<'a, T> DisabledPeekAsync<'a, T>
+impl<T> DisabledPeekAsync<'_, T>
 where
     T: Clone,
 {
@@ -168,7 +168,7 @@ pub struct DisabledReadAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
 where
     T: Clone;
 
-impl<'a, T> DisabledReadAsync<'a, T>
+impl<T> DisabledReadAsync<'_, T>
 where
     T: Clone,
 {
@@ -211,7 +211,7 @@ pub struct DisabledWriteAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
 where
     T: Clone;
 
-impl<'a, T> DisabledWriteAsync<'a, T>
+impl<T> DisabledWriteAsync<'_, T>
 where
     T: Clone,
 {
