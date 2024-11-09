@@ -17,6 +17,4 @@ pub use writer_::{TrBuffIterWrite, TrBuffIterTryWrite};
 
 pub mod x_deps {
     pub use abs_sync;
-
-    pub use abs_sync::x_deps::atomex;
 }
