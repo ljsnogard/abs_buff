@@ -7,10 +7,7 @@
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will lend zero or more slices for peeking.
-pub trait TrBuffIterPeek<T = u8>
-where
-    T: Clone,
-{
+pub trait TrBuffIterPeek<T = u8> {
     type SliceRef<'a>: Deref<Target = [T]> where Self: 'a;
     type BuffIter<'a>: IntoIterator<Item = Self::SliceRef<'a>> where Self: 'a;
     type Err: Error;
@@ -25,9 +22,6 @@ where
     fn peek_async(&mut self) -> Self::PeekAsync<'_>;
 }
 
-pub trait TrBuffIterTryPeek<T = u8>: TrBuffIterPeek<T>
-where
-    T: Clone,
-{
+pub trait TrBuffIterTryPeek<T = u8>: TrBuffIterPeek<T> {
     fn try_peek(&mut self) -> Result<Self::BuffIter<'_>, Self::Err>;
 }

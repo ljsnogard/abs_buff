@@ -7,10 +7,7 @@
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will lend zero or more slices for writing (and update cursor)
-pub trait TrBuffIterWrite<T = u8>
-where
-    T: Clone,
-{
+pub trait TrBuffIterWrite<T = u8> {
     type SliceMut<'a>: DerefMut<Target = [T]> where Self: 'a;
     type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>> where Self: 'a;
     type Err: Error;
@@ -25,10 +22,7 @@ where
     fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
 }
 
-pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T>
-where
-    T: Clone,
-{
+pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T> {
     fn try_write(
         &mut self,
         length: usize,

@@ -7,10 +7,7 @@
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will lend zero or more slices for reading (and update cursor)
-pub trait TrBuffIterRead<T = u8>
-where
-    T: Clone,
-{
+pub trait TrBuffIterRead<T = u8> {
     type SliceRef<'a>: Deref<Target = [T]> where Self: 'a;
     type BuffIter<'a>: IntoIterator<Item = Self::SliceRef<'a>> where Self: 'a;
     type Err: Error;
@@ -25,10 +22,7 @@ where
     fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
 }
 
-pub trait TrBuffIterTryRead<T = u8>: TrBuffIterRead<T>
-where
-    T: Clone,
-{
+pub trait TrBuffIterTryRead<T = u8>: TrBuffIterRead<T> {
     fn try_read(
         &mut self,
         length: usize,

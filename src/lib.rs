@@ -10,11 +10,16 @@ mod peeker_;
 mod reader_;
 mod writer_;
 
-pub use empty_::EmptyBuffIter;
+pub use empty_::{
+    DisabledPeekAsync, DisabledReadAsync, DisabledWriteAsync,
+    EmptyBuffIter, EmptyBuffIterError,
+} ;
 pub use peeker_::{TrBuffIterPeek, TrBuffIterTryPeek};
 pub use reader_::{TrBuffIterRead, TrBuffIterTryRead};
 pub use writer_::{TrBuffIterWrite, TrBuffIterTryWrite};
 
 pub mod x_deps {
     pub use abs_sync;
+
+    pub use abs_sync::x_deps::pin_utils;
 }

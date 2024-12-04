@@ -14,33 +14,22 @@ use crate::{
 };
 
 /// A placeholder type of buffer that will not lend any slices.
-pub struct EmptyBuffIter<T>(PhantomData<[T; 0]>)
-where
-    T: Clone;
+pub struct EmptyBuffIter<T>(PhantomData<[T; 0]>);
 
-impl<T> EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> EmptyBuffIter<T> {
     pub const fn new() -> Self {
         EmptyBuffIter(PhantomData)
     }
 }
 
-impl<T> Default for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> Default for EmptyBuffIter<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T> TrBuffIterPeek<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterPeek<T> for EmptyBuffIter<T> {
     type SliceRef<'a> = &'a [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceRef<'a>; 0] where Self: 'a;
     type Err = EmptyBuffIterError;
@@ -52,19 +41,13 @@ where
     }
 }
 
-impl<T> TrBuffIterTryPeek<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterTryPeek<T> for EmptyBuffIter<T> {
     fn try_peek(&mut self) -> Result<Self::BuffIter<'_>, Self::Err> {
         Result::Err(EmptyBuffIterError)
     }
 }
 
-impl<T> TrBuffIterRead<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterRead<T> for EmptyBuffIter<T> {
     type SliceRef<'a> = &'a [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceRef<'a>; 0] where Self: 'a;
     type Err = EmptyBuffIterError;
@@ -76,19 +59,13 @@ where
     }
 }
 
-impl<T> TrBuffIterTryRead<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterTryRead<T> for EmptyBuffIter<T> {
     fn try_read(&mut self, _: usize) -> Result<Self::BuffIter<'_>, Self::Err> {
         Result::Err(EmptyBuffIterError)
     }
 }
 
-impl<T> TrBuffIterWrite<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterWrite<T> for EmptyBuffIter<T> {
     type SliceMut<'a> = &'a mut [T] where Self: 'a;
     type BuffIter<'a> = [Self::SliceMut<'a>; 0] where Self: 'a;
     type Err = EmptyBuffIterError;
@@ -100,10 +77,7 @@ where
     }
 }
 
-impl<T> TrBuffIterTryWrite<T> for EmptyBuffIter<T>
-where
-    T: Clone,
-{
+impl<T> TrBuffIterTryWrite<T> for EmptyBuffIter<T> {
     fn try_write(&mut self, _: usize) -> Result<Self::BuffIter<'_>, Self::Err> {
         Result::Err(EmptyBuffIterError)
     }
@@ -121,23 +95,15 @@ impl fmt::Display for EmptyBuffIterError {
     }
 }
 
-pub struct DisabledPeekAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
-where
-    T: Clone;
+pub struct DisabledPeekAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>);
 
-impl<T> DisabledPeekAsync<'_, T>
-where
-    T: Clone,
-{
+impl<T> DisabledPeekAsync<'_, T> {
     fn new() -> Self {
         DisabledPeekAsync(PhantomData)
     }
 }
 
-impl<'a, T> IntoFuture for DisabledPeekAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> IntoFuture for DisabledPeekAsync<'a, T> {
     type IntoFuture = Ready<Self::Output>;
     type Output = Result<[&'a [T]; 0], EmptyBuffIterError>;
 
@@ -146,10 +112,7 @@ where
     }
 }
 
-impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledPeekAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledPeekAsync<'a, T> {
     type MayCancelOutput = <<Self as IntoFuture>::IntoFuture as Future>::Output;
 
     fn may_cancel_with<C>(
@@ -164,23 +127,15 @@ where
     }
 }
 
-pub struct DisabledReadAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
-where
-    T: Clone;
+pub struct DisabledReadAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>);
 
-impl<T> DisabledReadAsync<'_, T>
-where
-    T: Clone,
-{
+impl<T> DisabledReadAsync<'_, T> {
     fn new() -> Self {
         DisabledReadAsync(PhantomData)
     }
 }
 
-impl<'a, T> IntoFuture for DisabledReadAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> IntoFuture for DisabledReadAsync<'a, T> {
     type IntoFuture = Ready<Self::Output>;
     type Output = Result<[&'a [T]; 0], EmptyBuffIterError>;
 
@@ -189,10 +144,7 @@ where
     }
 }
 
-impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledReadAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledReadAsync<'a, T> {
     type MayCancelOutput = <<Self as IntoFuture>::IntoFuture as Future>::Output;
 
     fn may_cancel_with<C>(
@@ -207,23 +159,15 @@ where
     }
 }
 
-pub struct DisabledWriteAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>)
-where
-    T: Clone;
+pub struct DisabledWriteAsync<'a, T>(PhantomData<&'a mut EmptyBuffIter<T>>);
 
-impl<T> DisabledWriteAsync<'_, T>
-where
-    T: Clone,
-{
+impl<T> DisabledWriteAsync<'_, T> {
     fn new() -> Self {
         DisabledWriteAsync(PhantomData)
     }
 }
 
-impl<'a, T> IntoFuture for DisabledWriteAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> IntoFuture for DisabledWriteAsync<'a, T> {
     type IntoFuture = Ready<Self::Output>;
     type Output = Result<[&'a mut [T]; 0], EmptyBuffIterError>;
 
@@ -232,10 +176,7 @@ where
     }
 }
 
-impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledWriteAsync<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> TrIntoFutureMayCancel<'a> for DisabledWriteAsync<'a, T> {
     type MayCancelOutput = <<Self as IntoFuture>::IntoFuture as Future>::Output;
 
     fn may_cancel_with<C>(
