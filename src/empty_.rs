@@ -3,6 +3,7 @@ use core::{
     fmt,
     future::{self, Future, IntoFuture, Ready},
     marker::PhantomData,
+    mem::MaybeUninit,
     pin::Pin,
 };
 
@@ -66,7 +67,7 @@ impl<T> TrBuffIterTryRead<T> for EmptyBuffIter<T> {
 }
 
 impl<T> TrBuffIterWrite<T> for EmptyBuffIter<T> {
-    type SliceMut<'a> = &'a mut [T] where Self: 'a;
+    type SliceMut<'a> = &'a mut [MaybeUninit<T>] where Self: 'a;
     type BuffIter<'a> = [Self::SliceMut<'a>; 0] where Self: 'a;
     type Err = EmptyBuffIterError;
 
@@ -169,7 +170,7 @@ impl<T> DisabledWriteAsync<'_, T> {
 
 impl<'a, T> IntoFuture for DisabledWriteAsync<'a, T> {
     type IntoFuture = Ready<Self::Output>;
-    type Output = Result<[&'a mut [T]; 0], EmptyBuffIterError>;
+    type Output = Result<[&'a mut [MaybeUninit<T>]; 0], EmptyBuffIterError>;
 
     fn into_future(self) -> Self::IntoFuture {
         future::ready(Result::Err(EmptyBuffIterError))

@@ -1,6 +1,7 @@
 ﻿use core::{
     error::Error,
     iter::IntoIterator,
+    mem::MaybeUninit,
     ops::DerefMut,
 };
 
@@ -8,7 +9,7 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will lend zero or more slices for writing (and update cursor)
 pub trait TrBuffIterWrite<T = u8> {
-    type SliceMut<'a>: DerefMut<Target = [T]> where Self: 'a;
+    type SliceMut<'a>: DerefMut<Target = [MaybeUninit<T>]> where Self: 'a;
     type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>> where Self: 'a;
     type Err: Error;
 
