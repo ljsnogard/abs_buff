@@ -9,12 +9,17 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will lend zero or more slices for writing (and update cursor)
 pub trait TrBuffIterWrite<T = u8> {
-    type SliceMut<'a>: DerefMut<Target = [MaybeUninit<T>]> where Self: 'a;
-    type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>> where Self: 'a;
+    type SliceMut<'a>: DerefMut<Target = [MaybeUninit<T>]> +
+        IntoIterator<Item = MaybeUninit<T>>
+    where Self: 'a;
+
+    type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>>
+    where Self: 'a;
+
     type Err: Error;
 
-    type WriteAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffIter<'a>, Self::Err>>
+    type WriteAsync<'a>: TrIntoFutureMayCancel<'a,
+        MayCancelOutput = Result<Self::BuffIter<'a>, Self::Err>>
     where
         Self: 'a;
 
