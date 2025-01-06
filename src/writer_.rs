@@ -11,17 +11,19 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 pub trait TrBuffIterWrite<T = u8> {
     type SliceMut<'a>: DerefMut<Target = [MaybeUninit<T>]> +
         IntoIterator<Item = MaybeUninit<T>>
-    where Self: 'a;
+    where
+        Self: 'a;
 
     type BuffIter<'a>: IntoIterator<Item = Self::SliceMut<'a>>
-    where Self: 'a;
-
-    type Err: Error;
+    where
+        Self: 'a;
 
     type WriteAsync<'a>: TrIntoFutureMayCancel<'a,
         MayCancelOutput = Result<Self::BuffIter<'a>, Self::Err>>
     where
         Self: 'a;
+
+    type Err: Error;
 
     /// Lend some slices for writing. The total length of these slices will be
     /// no greater than the length given in the argument.

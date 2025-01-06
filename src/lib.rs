@@ -5,10 +5,12 @@
 #[cfg(test)]
 extern crate std;
 
+mod chunk_;
 mod peeker_;
 mod reader_;
 mod writer_;
 
+pub use chunk_::{Chunk, PhantomChunk};
 pub use peeker_::{TrBuffIterPeek, TrBuffIterTryPeek};
 pub use reader_::{TrBuffIterRead, TrBuffIterTryRead};
 pub use writer_::{TrBuffIterWrite, TrBuffIterTryWrite};
