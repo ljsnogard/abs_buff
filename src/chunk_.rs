@@ -1,128 +1,69 @@
 ﻿use core::{
     borrow::Borrow,
     iter::{self, IntoIterator},
-    marker::PhantomData,
 };
-
-pub trait TrChunk {
-    type IterItem;
-    type SliceElem: Clone;
-    type IntoIter: IntoIterator<Item = Self::IterItem>;
-    type BorrowedSlice: Borrow<[Self::SliceElem]>;
-
-    fn try_as_slice<'a, TSlice, TElem>(
-        &'a self,
-        transmute: impl FnOnce(&'a Self::IntoIter) -> Option<TSlice>,
-    ) -> Option<impl 'a + TrChunk<SliceElem = TElem, BorrowedSlice = TSlice>>
-    where
-        Self::IntoIter: 'a,
-        TSlice: 'a + Borrow<[TElem]>,
-        TElem: 'a + Clone;
-
-    fn try_as_iterable(&self) -> Option<&Self::IntoIter>;
-}
 
 /// To encapsulate data chunks that either its items cannot be cloned, or items
 /// can be cloned and represented within a slice.
-pub enum Chunk<I, T, S, E>
+pub enum Chunk<I, S>
 where
-    I: IntoIterator<Item = T>,
-    S: Borrow<[E]>,
-    E: Clone,
+    I: IntoIterator,
+    S: Borrow<[I::Item]>,
 {
     Iterable(I),
-    Slice(S, PhantomData<[E]>),
+    Slice(S),
 }
 
-impl<I, E> Chunk<I, E, PhantomChunk<()>, ()>
+impl<I> Chunk<I, PhantomChunk<I::Item>>
 where
-    I: IntoIterator<Item = E>,
+    I: IntoIterator,
 {
     pub const fn iterable(iterable: I) -> Self {
         Chunk::Iterable(iterable)
     }
 }
 
-impl<S, T> Chunk<PhantomChunk<T>, T, S, T>
+impl<S, T> Chunk<PhantomChunk<T>, S>
 where
     S: Borrow<[T]>,
     T: Clone,
 {
     pub const fn slice(slice: S) -> Self {
-        Chunk::Slice(slice, PhantomData)
+        Chunk::Slice(slice)
     }
 }
 
-impl<I, T, S, E> Chunk<I, T, S, E>
+impl<I, S> Chunk<I, S>
 where
-    I: IntoIterator<Item = T>,
-    S: Borrow<[E]>,
-    E: Clone,
+    I: IntoIterator,
+    S: Borrow<[I::Item]>,
 {
     /// Returns the transmute result wrapped with [Some] only when self matches
     /// [Chunk::Iterable] and transmute returns [Some], or returns [None].
     pub fn try_as_slice<'a, TSlice, TElem>(
         &'a self,
         transmute: impl FnOnce(&'a I) -> Option<TSlice>,
-    ) -> Option<Chunk<PhantomChunk<TElem>, TElem, TSlice, TElem>>
+    ) -> Option<Chunk<PhantomChunk<TElem>, TSlice>>
     where
         TSlice: 'a + Borrow<[TElem]>,
         TElem: Clone,
     {
         if let Chunk::Iterable(iter) = &self {
             let s = transmute(iter)?;
-            Option::Some(Chunk::Slice(s, PhantomData))
-        } else {
-            Option::None
-        }
-    }
-
-    pub fn try_as_iterable(&self) -> Option<&I> {
-        if let Chunk::Iterable(iter) = &self {
-            Option::Some(iter)
+            Option::Some(Chunk::Slice(s))
         } else {
             Option::None
         }
     }
 }
 
-impl<I, T, S, E> From<S> for Chunk<I, T, S, E>
+impl<S, T> From<S> for Chunk<PhantomChunk<T>, S>
 where
-    I: IntoIterator<Item = T>,
-    S: Borrow<[E]>,
-    E: Clone,
+    S: Borrow<[T]>,
+    T: Clone,
 {
     fn from(value: S) -> Self {
-        Chunk::Slice(value, PhantomData)
-    }
-}
-
-impl<I, T, S, E> TrChunk for Chunk<I, T, S, E>
-where
-    I: IntoIterator<Item = T>,
-    S: Borrow<[E]>,
-    E: Clone,
-{
-    type IterItem = T;
-    type SliceElem = E;
-    type IntoIter = I;
-    type BorrowedSlice = S;
-
-    #[inline]
-    fn try_as_iterable(&self) -> Option<&Self::IntoIter> {
-        Chunk::try_as_iterable(self)
-    }
-
-    fn try_as_slice<'a, TSlice, TElem>(
-        &'a self,
-        transmute: impl FnOnce(&'a Self::IntoIter) -> Option<TSlice>,
-    ) -> Option<impl 'a + TrChunk<SliceElem = TElem, BorrowedSlice = TSlice>>
-    where
-        Self::IntoIter: 'a,
-        TSlice: 'a + Borrow<[TElem]>,
-        TElem: 'a + Clone,
-    {
-        Chunk::try_as_slice(self, transmute)
+        Chunk::Slice(value)
     }
 }
 
@@ -137,10 +78,7 @@ impl<T> IntoIterator for PhantomChunk<T> {
     }
 }
 
-impl<T> Borrow<[T]> for PhantomChunk<T>
-where
-    T: Clone,
-{
+impl<T> Borrow<[T]> for PhantomChunk<T> {
     fn borrow(&self) -> &[T] {
         &self.0
     }
@@ -151,22 +89,20 @@ mod tests_ {
     use std::boxed::Box;
     use super::*;
 
-    fn accept_slice<I, T, S, E>(
-        x: impl Into<Chunk<I, T, S, E>>,
-    ) -> Chunk<I, T, S, E>
+    fn accept_slice<S, T>(s: S) -> Chunk<PhantomChunk<T>, S>
     where
-        I: IntoIterator<Item = T>,
-        S: Borrow<[E]>,
-        E: Clone,
+        S: Borrow<[T]>,
+        T: Clone,
     {
-        x.into()
+        s.into()
     }
 
     #[test]
     fn slice_should_be_chunk_slice() {
         let arr = [0u8; 1];
-        let chunk: Chunk<PhantomChunk<u8>, u8, &[u8], u8> = accept_slice(arr.as_slice());
-        assert!(matches!(chunk, Chunk::Slice(_, _)));
+        let slice = arr.as_slice();
+        let chunk = accept_slice(slice);
+        assert!(matches!(chunk, Chunk::Slice(_)));
 
         let chunk = Chunk::iterable(arr.as_ref());
         assert!(matches!(chunk, Chunk::Iterable(_)));
@@ -174,7 +110,7 @@ mod tests_ {
         let Option::Some(chunk) = try_as else {
             panic!()
         };
-        assert!(matches!(chunk, Chunk::Slice(_, _)));
+        assert!(matches!(chunk, Chunk::Slice(_)));
 
         let arr = Box::new([0u8; 1]);
         let slice = arr.as_slice();
