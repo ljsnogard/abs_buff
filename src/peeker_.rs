@@ -1,14 +1,15 @@
 ﻿use core::{
     error::Error,
     iter::IntoIterator,
-    ops::Deref,
 };
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
+use crate::TrBuffSegmRef;
+
 /// Buffer that will lend zero or more slices for peeking.
 pub trait TrBuffIterPeek<T = u8> {
-    type SliceRef<'a>: Deref<Target = [T]>
+    type SliceRef<'a>: 'a + TrBuffSegmRef<T>
     where
         Self: 'a;
 
