@@ -1,25 +1,27 @@
 ﻿use core::{
+    borrow::Borrow,
     error::Error,
     iter::IntoIterator,
 };
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
-use crate::TrBuffSegmRef;
-
-/// Buffer that will lend zero or more slices for peeking.
+/// Buffer that will borrow zero or more slices for peeking.
 pub trait TrBuffIterPeek<T = u8> {
-    type SliceRef<'a>: 'a + TrBuffSegmRef<T>
+    type SegmRef<'a>: 'a + Borrow<[T]>
     where
+        T: 'a,
         Self: 'a;
 
-    type BuffIter<'a>: IntoIterator<Item = Self::SliceRef<'a>>
+    type BuffIter<'a>: IntoIterator<Item = Self::SegmRef<'a>>
     where
+        T: 'a,
         Self: 'a;
 
     type PeekAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
         Result<Self::BuffIter<'a>, Self::Err>>
     where
+        T: 'a,
         Self: 'a;
 
     type Err: Error;
