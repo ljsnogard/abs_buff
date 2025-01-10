@@ -9,7 +9,7 @@ use crate::TrBuffSegmRef;
 
 /// Buffer that will lend zero or more slices for reading (and update cursor)
 pub trait TrBuffIterRead<T = u8> {
-    type SegmRef<'a>: TrBuffSegmRef<'a, T>
+    type SegmRef<'a>: 'a + TrBuffSegmRef<T>
     where
         Self: 'a;
 
@@ -17,7 +17,7 @@ pub trait TrBuffIterRead<T = u8> {
     where
         Self: 'a;
 
-    type ReadAsync<'a>: TrIntoFutureMayCancel<'a,
+    type ReadAsync<'a>: TrIntoFutureMayCancel<
         MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;

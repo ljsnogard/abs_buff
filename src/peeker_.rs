@@ -16,7 +16,7 @@ pub trait TrBuffIterPeek<T = u8> {
     where
         Self: 'a;
 
-    type PeekAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
+    type PeekAsync<'a>: TrIntoFutureMayCancel<MayCancelOutput =
         Result<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;

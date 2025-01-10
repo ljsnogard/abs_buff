@@ -9,7 +9,7 @@ use crate::TrBuffSegmMut;
 
 /// Buffer that will lend zero or more slices for writing (and update cursor)
 pub trait TrBuffIterWrite<T = u8> {
-    type SegmMut<'a>: TrBuffSegmMut<'a, T>
+    type SegmMut<'a>: 'a + TrBuffSegmMut<T>
     where
         Self: 'a;
 
@@ -19,7 +19,7 @@ pub trait TrBuffIterWrite<T = u8> {
     where
         Self: 'a;
 
-    type WriteAsync<'a>: TrIntoFutureMayCancel<'a,
+    type WriteAsync<'a>: TrIntoFutureMayCancel<
         MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;

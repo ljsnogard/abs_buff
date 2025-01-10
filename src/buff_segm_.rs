@@ -20,7 +20,7 @@ where
     }
 }
 
-pub trait TrBuffSegmRef<'a, T>
+pub trait TrBuffSegmRef<T>
 where
     Self: TrBuffSegmView<Item = T>,
 {
@@ -29,10 +29,10 @@ where
     fn take_segm_ref(
         &mut self,
         length: usize,
-    ) -> impl TrBuffSegmRef<'_, T>;
+    ) -> impl TrBuffSegmRef<T>;
 }
 
-pub trait TrBuffSegmMut<'a, T>
+pub trait TrBuffSegmMut<T>
 where
     Self: TrBuffSegmView<Item = MaybeUninit<T>> +
         AsMut<[MaybeUninit<T>]> + 
@@ -40,9 +40,12 @@ where
 {
     /// Move items in source into this segment, reducing the length of both the
     /// source and the target segment (this segment).
-    fn dump_from_segm<'s, S>(&'s mut self, source: &'s mut S) -> usize
+    fn dump_from_segm<S>(
+        &mut self,
+        source: &mut S,
+    ) -> usize
     where
-        S: TrBuffSegmRef<'s, T>,
+        S: TrBuffSegmRef<T>,
     {
         let mut dst = self.take_segm_mut(source.len());
         let src = source.take_segm_ref(dst.len());
@@ -52,9 +55,9 @@ where
         }
         let dst: &mut [MaybeUninit<T>] = dst.borrow_mut();
         let dst = &mut dst[0] as *mut MaybeUninit<T> as *mut T;
-        let src : &[T] = src.borrow();
-        let src = &src[0] as *const T;
-        unsafe { ptr::copy_nonoverlapping(src, dst, count) };
+        let src_slice : &[T] = src.borrow();
+        let src_head = &src_slice[0] as *const T;
+        unsafe { ptr::copy_nonoverlapping(src_head, dst, count) };
         count
     }
 
@@ -91,5 +94,5 @@ where
     fn take_segm_mut(
         &mut self, 
         length: usize,
-    ) -> impl TrBuffSegmMut<'_, T>;
+    ) -> impl TrBuffSegmMut<T>;
 }
