@@ -5,10 +5,12 @@
 #[cfg(test)]
 extern crate std;
 
+mod buff_segm_;
 mod peeker_;
 mod reader_;
 mod writer_;
 
+pub use buff_segm_::{TrBuffSegmView, TrBuffSegmMut, TrBuffSegmRef};
 pub use peeker_::{TrBuffIterPeek, TrBuffIterTryPeek};
 pub use reader_::{TrBuffIterRead, TrBuffIterTryRead};
 pub use writer_::{TrBuffIterWrite, TrBuffIterTryWrite};

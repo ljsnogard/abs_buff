@@ -8,20 +8,17 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 /// Buffer that will borrow zero or more slices for peeking.
 pub trait TrBuffIterPeek<T = u8> {
-    type SegmRef<'a>: 'a + Borrow<[T]>
+    type SegmRef<'a>: Borrow<[T]>
     where
-        T: 'a,
         Self: 'a;
 
-    type BuffIter<'a>: IntoIterator<Item = Self::SegmRef<'a>>
+    type Segments<'a>: IntoIterator<Item = Self::SegmRef<'a>>
     where
-        T: 'a,
         Self: 'a;
 
     type PeekAsync<'a>: TrIntoFutureMayCancel<'a, MayCancelOutput =
-        Result<Self::BuffIter<'a>, Self::Err>>
+        Result<Self::Segments<'a>, Self::Err>>
     where
-        T: 'a,
         Self: 'a;
 
     type Err: Error;
@@ -32,5 +29,5 @@ pub trait TrBuffIterPeek<T = u8> {
 }
 
 pub trait TrBuffIterTryPeek<T = u8>: TrBuffIterPeek<T> {
-    fn try_peek(&mut self) -> Result<Self::BuffIter<'_>, Self::Err>;
+    fn try_peek(&mut self) -> Result<Self::Segments<'_>, Self::Err>;
 }

@@ -1,15 +1,15 @@
 ﻿[package]
 name = "abs_buff"
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 
 authors = ["lino <lino_snsalias@outlook.com>"]
 description = "ABStraction of BUFFered IO"
-homepage = "https://github.com/ljsnogard/abs_buff"
+repository = "https://github.com/ljsnogard/abs_buff"
 keywords = ["IO", "buffer", "traits"]
 categories = ["no-std"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-abs_sync = { git = "https://github.com/ljsnogard/abs_sync", branch = "dev/0.1.2" }
+abs_sync = { git = "https://github.com/ljsnogard/abs_sync.git", branch = "dev/0.1.2" }

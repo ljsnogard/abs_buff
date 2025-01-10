@@ -1,30 +1,27 @@
 ﻿use core::{
-    borrow::BorrowMut,
     error::Error,
     iter::IntoIterator,
-    mem::MaybeUninit,
 };
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
+use crate::TrBuffSegmMut;
+
 /// Buffer that will lend zero or more slices for writing (and update cursor)
 pub trait TrBuffIterWrite<T = u8> {
-    type SegmMut<'a>: BorrowMut<[MaybeUninit<T>]>
+    type SegmMut<'a>: TrBuffSegmMut<'a, T>
     where
-        T: 'a,
         Self: 'a;
 
     /// Zero or more segments returns to the caller of
     /// [write_async](TrBuffIterWrite::write_async)
-    type SegmIter<'a>: IntoIterator<Item = Self::SegmMut<'a>>
+    type Segments<'a>: IntoIterator<Item = Self::SegmMut<'a>>
     where
-        T: 'a,
         Self: 'a;
 
     type WriteAsync<'a>: TrIntoFutureMayCancel<'a,
-        MayCancelOutput = Result<Self::SegmIter<'a>, Self::Err>>
+        MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
-        T: 'a,
         Self: 'a;
 
     type Err: Error;
@@ -38,5 +35,5 @@ pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T> {
     fn try_write(
         &mut self,
         length: usize,
-    ) -> Result<Self::SegmIter<'_>, Self::Err>;
+    ) -> Result<Self::Segments<'_>, Self::Err>;
 }

@@ -1,27 +1,25 @@
 ﻿use core::{
-    borrow::Borrow,
     error::Error,
     iter::IntoIterator,
 };
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
+use crate::TrBuffSegmRef;
+
 /// Buffer that will lend zero or more slices for reading (and update cursor)
 pub trait TrBuffIterRead<T = u8> {
-    type SegmRef<'a>: Borrow<[T]>
+    type SegmRef<'a>: TrBuffSegmRef<'a, T>
     where
-        T: 'a,
         Self: 'a;
 
-    type SegmIter<'a>: IntoIterator<Item = Self::SegmRef<'a>>
+    type Segments<'a>: IntoIterator<Item = Self::SegmRef<'a>>
     where
-        T: 'a,
         Self: 'a;
 
     type ReadAsync<'a>: TrIntoFutureMayCancel<'a,
-        MayCancelOutput = Result<Self::SegmIter<'a>, Self::Err>>
+        MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
-        T: 'a,
         Self: 'a;
 
     type Err: Error;
@@ -35,5 +33,5 @@ pub trait TrBuffIterTryRead<T = u8>: TrBuffIterRead<T> {
     fn try_read(
         &mut self,
         length: usize,
-    ) -> Result<Self::SegmIter<'_>, Self::Err>;
+    ) -> Result<Self::Segments<'_>, Self::Err>;
 }
