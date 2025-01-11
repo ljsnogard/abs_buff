@@ -6,7 +6,8 @@
 
 use abs_sync::cancellation::TrIntoFutureMayCancel;
 
-/// Buffer that will borrow zero or more slices for peeking.
+/// Buffer that will borrow zero or more segments for data observation without
+/// consuming them.
 pub trait TrBuffIterPeek<T = u8> {
     type SegmRef<'a>: Borrow<[T]>
     where

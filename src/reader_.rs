@@ -7,7 +7,7 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 use crate::TrBuffSegmRef;
 
-/// Buffer that will lend zero or more slices for reading (and update cursor)
+/// Buffer that will emit zero or more segments for consumer (and update cursor)
 pub trait TrBuffIterRead<T = u8> {
     type SegmRef<'a>: 'a + TrBuffSegmRef<T>
     where

@@ -7,7 +7,7 @@ use abs_sync::cancellation::TrIntoFutureMayCancel;
 
 use crate::TrBuffSegmMut;
 
-/// Buffer that will lend zero or more slices for writing (and update cursor)
+/// Buffer that will emit zero or more segments for producer (and update cursor)
 pub trait TrBuffIterWrite<T = u8> {
     type SegmMut<'a>: 'a + TrBuffSegmMut<T>
     where

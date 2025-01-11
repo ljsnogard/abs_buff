@@ -11,21 +11,28 @@ where
 {
     type Item: Sized;
 
+    /// Returns if the elements are all consumed, or never existing.
     fn is_empty(&self) -> bool {
         self.as_ref().is_empty()
     }
 
+    /// The length of the unconsumed part of the segment.
     fn len(&self) -> usize {
         self.as_ref().len()
     }
+
+    /// Iterate over the elements of the internal buffer retained by the segment
+    /// and retrieve as pointers.
+    fn iter_ptr(&self) -> impl Iterator<Item = *const Self::Item>;
 }
 
 pub trait TrBuffSegmRef<T>
 where
     Self: TrBuffSegmView<Item = T>,
 {
-    /// Take a sliced segment with a length limited by the given length out
-    /// from this segment, reducing the length of this segment.
+    /// Take a sliced segment out from this segment with a length limited by
+    /// by the argument, reducing the length of this segment when the taken
+    /// slice drops.
     fn take_segm_ref(
         &mut self,
         length: usize,
@@ -38,12 +45,17 @@ where
         AsMut<[MaybeUninit<T>]> + 
         BorrowMut<[MaybeUninit<T>]>,
 {
+    /// Take a sliced segment out from this segment with a length limited by
+    /// by the argument, reducing the length of this segment when the taken
+    /// slice drops.
+    fn take_segm_mut(
+        &mut self, 
+        length: usize,
+    ) -> impl TrBuffSegmMut<T>;
+
     /// Move items in source into this segment, reducing the length of both the
     /// source and the target segment (this segment).
-    fn dump_from_segm<S>(
-        &mut self,
-        source: &mut S,
-    ) -> usize
+    fn dump_from_segm<S>(&mut self, source: &mut S) -> usize
     where
         S: TrBuffSegmRef<T>,
     {
@@ -88,11 +100,4 @@ where
         }
         count
     }
-
-    /// Take a sliced segment with a length limited by the given length out
-    /// from this segment, reducing the length of this segment.
-    fn take_segm_mut(
-        &mut self, 
-        length: usize,
-    ) -> impl TrBuffSegmMut<T>;
 }
