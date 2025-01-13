@@ -24,6 +24,10 @@ where
     /// Iterate over the elements of the internal buffer retained by the segment
     /// and retrieve as pointers.
     fn iter_ptr(&self) -> impl Iterator<Item = *const Self::Item>;
+
+    /// Returns the length of the borrowed segment, no matter the elements are
+    /// consumed or not. This is usually used by the reclaim function.
+    fn borrowed_len(&self) -> usize;
 }
 
 pub trait TrBuffSegmRef<T>
