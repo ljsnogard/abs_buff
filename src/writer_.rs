@@ -3,7 +3,7 @@
     iter::IntoIterator,
 };
 
-use abs_sync::cancellation::TrIntoFutureMayCancel;
+use abs_sync::cancellation::TrMayCancel;
 
 use crate::TrBuffSegmMut;
 
@@ -19,7 +19,7 @@ pub trait TrBuffIterWrite<T = u8> {
     where
         Self: 'a;
 
-    type WriteAsync<'a>: TrIntoFutureMayCancel<
+    type WriteAsync<'a>: TrMayCancel<'a,
         MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;

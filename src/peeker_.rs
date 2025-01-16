@@ -4,7 +4,7 @@
     iter::IntoIterator,
 };
 
-use abs_sync::cancellation::TrIntoFutureMayCancel;
+use abs_sync::cancellation::TrMayCancel;
 
 /// Buffer that will borrow zero or more segments for data observation without
 /// consuming them.
@@ -17,8 +17,8 @@ pub trait TrBuffIterPeek<T = u8> {
     where
         Self: 'a;
 
-    type PeekAsync<'a>: TrIntoFutureMayCancel<MayCancelOutput =
-        Result<Self::Segments<'a>, Self::Err>>
+    type PeekAsync<'a>: TrMayCancel<'a,
+        MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;
 
