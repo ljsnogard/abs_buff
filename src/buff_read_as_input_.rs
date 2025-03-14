@@ -35,7 +35,7 @@ where
 
 impl<'a, R, T> From<&'a mut R> for BuffReadAsInput<&'a mut R, R, T>
 where
-    R: TrBuffIterRead<T>
+    R: TrBuffIterRead<T>,
 {
     fn from(value: &'a mut R) -> Self {
         BuffReadAsInput::new(value)
@@ -44,7 +44,7 @@ where
 
 impl<R, T> From<R> for BuffReadAsInput<R, R, T>
 where
-    R: TrBuffIterRead<T>
+    R: TrBuffIterRead<T>,
 {
     fn from(value: R) -> Self {
         BuffReadAsInput::new(value)
@@ -256,12 +256,12 @@ where
             S: TrBuffSegmRef<X>,
         {
             let mut copied = 0usize;
+            let buff_len = buffer.len();
             for mut s in segments.into_iter() {
-                let buff_len = buffer.len();
                 let target = &mut buffer[copied..buff_len - copied];
                 let c = s.fill_into_buff(target);
                 copied += c;
-                if copied == buffer.len() {
+                if copied == buff_len {
                     break
                 }
             }

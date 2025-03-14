@@ -48,8 +48,8 @@ where
         let src_head = (&src.as_ref()[0]) as *const T;
         let dst_head = (&mut target[0]) as *mut MaybeUninit<T> as *mut T;
 
-        // This is sound because it is actually a move operation since `src`
-        // will drop and convert the "copied" items `MaybeUninit`
+        // This is sound because it is semantically a move operation since `src`
+        // will drop and convert the "copied" items into `MaybeUninit`
         unsafe { ptr::copy_nonoverlapping(src_head, dst_head, count) };
         count
     }
@@ -75,17 +75,33 @@ where
     where
         S: TrBuffSegmRef<T>,
     {
-        let mut dst = self.take_segm_mut(source.len());
-        let src = source.take_segm_ref(dst.len());
-        let count = cmp::min(dst.len(), src.len());
+        let count = cmp::min(source.len(), self.len());
         if count == 0 {
             return count;
         }
-        let dst: &mut [MaybeUninit<T>] = dst.borrow_mut();
-        let dst = &mut dst[0] as *mut MaybeUninit<T> as *mut T;
-        let src_slice : &[T] = src.borrow();
-        let src_head = &src_slice[0] as *const T;
-        unsafe { ptr::copy_nonoverlapping(src_head, dst, count) };
+        let src = source.take_segm_ref(count);
+        let src = src.as_ref();
+
+        // This is souned because the source segment is not expected to drop
+        // the element items when it drops. Thus this is semantically a move.
+        let src = unsafe {
+            let head = &src[0] as *const T as *const MaybeUninit<T>;
+            let p = ptr::slice_from_raw_parts(head, src.len());
+            &*p
+        };
+        self.dump_from_slice(src)
+    }
+
+    fn dump_from_slice(&mut self, source: &[MaybeUninit<T>]) -> usize {
+        let count = cmp::min(source.len(), self.len());
+        if count == 0 {
+            return count;
+        }
+        let mut dst = self.take_segm_mut(count);
+        let dst = (&mut dst.as_mut()[0]) as *mut MaybeUninit<T> as *mut T;
+        let src = &source[0..count];
+        let src = &src[0] as *const MaybeUninit<T> as *const T;
+        unsafe { ptr::copy_nonoverlapping(src, dst, count) };
         count
     }
 
