@@ -41,6 +41,18 @@ where
         &mut self,
         length: usize,
     ) -> impl TrBuffSegmRef<T>;
+
+    fn fill_into_buff(&mut self, target: &mut [MaybeUninit<T>]) -> usize {
+        let count = cmp::min(target.len(), self.len());
+        let src = self.take_segm_ref(count);
+        let src_head = (&src.as_ref()[0]) as *const T;
+        let dst_head = (&mut target[0]) as *mut MaybeUninit<T> as *mut T;
+
+        // This is sound because it is actually a move operation since `src`
+        // will drop and convert the "copied" items `MaybeUninit`
+        unsafe { ptr::copy_nonoverlapping(src_head, dst_head, count) };
+        count
+    }
 }
 
 pub trait TrBuffSegmMut<T>

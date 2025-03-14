@@ -5,6 +5,8 @@
 
 use abs_sync::cancellation::TrMayCancel;
 
+use anylr::SomeOf;
+
 use crate::TrBuffSegmMut;
 
 /// Buffer that will emit zero or more segments for producer (and update cursor)
@@ -20,7 +22,7 @@ pub trait TrBuffIterWrite<T = u8> {
         Self: 'a;
 
     type WriteAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = Result<Self::Segments<'a>, Self::Err>>
+        MayCancelOutput = SomeOf<Self::Segments<'a>, Self::Err>>
     where
         Self: 'a;
 
@@ -35,5 +37,5 @@ pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T> {
     fn try_write(
         &mut self,
         length: usize,
-    ) -> Result<Self::Segments<'_>, Self::Err>;
+    ) -> SomeOf<Self::Segments<'_>, Self::Err>;
 }

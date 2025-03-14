@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "abs_buff"
 version = "0.2.0"
 edition = "2024"
@@ -13,3 +13,4 @@ readme = "README.md"
 
 [dependencies]
 abs_sync = { git = "https://github.com/ljsnogard/abs_sync.git", branch = "dev/0.2.0" }
+anylr = { git = "https://github.com/ljsnogard/anylr.rs.git" }
