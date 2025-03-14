@@ -1,6 +1,7 @@
 use core::{
     error::Error,
-    mem::MaybeUninit, ptr,
+    mem::{self, MaybeUninit},
+    ptr,
 };
 
 use abs_sync::cancellation::TrMayCancel;
@@ -48,6 +49,10 @@ pub trait TrUnbufferedOutput<T = u8> {
     where
         T: Clone,
     {
+        if mem::size_of::<T>() == 0 {
+            // Handle ZSTs separately, as copying them is unnecessary and UB
+            return self.write_async(&[])
+        }
         unsafe {
             let src_head = &source[0] as *const T as *const MaybeUninit<T>;
             let slice = ptr::slice_from_raw_parts(src_head, source.len());
