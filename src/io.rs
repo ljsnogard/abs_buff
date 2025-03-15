@@ -8,7 +8,16 @@ use abs_sync::cancellation::TrMayCancel;
 
 use anylr::SomeOf;
 
-/// Unbuffered input device
+/// Unbuffered input device. Similar to `futures::io::AsyncRead` or
+/// `tokio::io::AsyncRead`.
+///
+/// ## Discussion
+/// - Opinions from reviewers is the trait should mark `unsafe` because of 
+///   the potential memory-align issue in parameter of `target` for
+///   `read_async` function.
+/// - Document of `MaybeUninit<T>` implies that data in it should be aligned
+///   so readers of `MaybeUninit<T>` can focus on issues other than memory
+///   alignment.
 pub trait TrUnbufferedInput<T = u8> {
     type Err : Error;
 
@@ -19,9 +28,21 @@ pub trait TrUnbufferedInput<T = u8> {
         Self: 'a;
 
     /// Move the data out of the device and into the specified target buffer.
+    ///
+    /// ## Safety
+    ///
+    /// - It's the responsibility of the implementation providers to guarantee that, 
+    ///   data written into the `target` must be memory-aligned for type `T`;
+    ///
+    /// - It's the responsibility of the caller to guarantee that, conversion from
+    ///   `MaybeUninit<T>` to `T` is sound;
+    ///
+    /// - For example, if `T: Clone` is satisfied, implementaion provider to move
+    ///   a `t` of `T` into `target`, should do `target[0].write(t.clone())`; caller
+    ///   should do `let t = target[0].assume_init()`;
     fn read_async<'a>(
-        &'a mut self, target:
-        &'a mut [MaybeUninit<T>],
+        &'a mut self,
+        target: &'a mut [MaybeUninit<T>],
     ) -> Self::ReadAsync<'a>;
 }
 
