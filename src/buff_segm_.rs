@@ -25,9 +25,9 @@ where
     /// and retrieve as pointers.
     fn iter_ptr(&self) -> impl Iterator<Item = *const Self::Item>;
 
-    /// Returns the length of the borrowed segment, no matter the elements are
+    /// Returns the capacity of the segment, no matter the elements are
     /// consumed or not. This is usually used by the reclaim function.
-    fn borrowed_len(&self) -> usize;
+    fn capacity(&self) -> usize;
 }
 
 pub trait TrBuffSegmRef<T>
@@ -35,8 +35,8 @@ where
     Self: TrBuffSegmView<Item = T>,
 {
     /// Take a sliced segment out from this segment with a length limited by
-    /// by the argument, reducing the length of this segment when the taken
-    /// slice drops.
+    /// the argument, reducing the length of this segment when the taken slice
+    /// drops.
     fn take_segm_ref(
         &mut self,
         length: usize,
@@ -61,9 +61,9 @@ where
         AsMut<[MaybeUninit<T>]> + 
         BorrowMut<[MaybeUninit<T>]>,
 {
-    /// Take a sliced segment out from this segment with a length limited by
-    /// by the argument, reducing the length of this segment when the taken
-    /// slice drops.
+    /// Take a sliced segment out from this segment with a length limited by the
+    /// the argument, reducing the length of this segment when the taken slice
+    /// drops.
     fn take_segm_mut(
         &mut self, 
         length: usize,
@@ -92,6 +92,7 @@ where
         self.dump_from_slice(src)
     }
 
+    /// Move items in source slice into this segment without clone semantics.
     fn dump_from_slice(&mut self, source: &[MaybeUninit<T>]) -> usize {
         let count = cmp::min(source.len(), self.len());
         if count == 0 {
@@ -105,8 +106,8 @@ where
         count
     }
 
-    /// Clone items in source into this segment, reducing the length of this 
-    /// segment.
+    /// Clone items from source slice into this segment. This will reducing the
+    /// length of this segment.
     fn clone_from_slice(&mut self, source: &[T]) -> usize
     where
         T: Clone,
@@ -118,6 +119,10 @@ where
         }
         let dst: &mut [MaybeUninit<T>] = dst.borrow_mut();
         let src = &source[..count];
+
+        // If `T: Clone` needs drop, we must preserve the clone semantic when 
+        // copying into the segment. This promises the correct behaviours when
+        // cloning items like `Rc` or `Arc`
         if mem::needs_drop::<T>() {
             for i in 0..count {
                 let m = &mut dst[i];
