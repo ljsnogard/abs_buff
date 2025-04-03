@@ -1,23 +1,18 @@
-﻿use core::{
-    error::Error,
-    iter::IntoIterator,
-};
+﻿use core::error::Error;
 
 use abs_sync::cancellation::TrMayCancel;
 
 use anylr::SomeOf;
 
-use crate::TrBuffSegmMut;
+use crate::{BuffWriteAsOutput, Demand, TrBuffSegmMut, TrOutput};
 
 /// Buffer that will emit zero or more segments for producer (and update cursor)
-pub trait TrBuffIterWrite<T = u8> {
-    type SegmMut<'a>: 'a + TrBuffSegmMut<T>
+pub trait TrBuffWrite<T = u8> {
+    type WriterSegm<'a>: 'a + TrBuffSegmMut<T>
     where
         Self: 'a;
 
-    /// Zero or more segments returns to the caller of
-    /// [write_async](TrBuffIterWrite::write_async)
-    type Segments<'a>: IntoIterator<Item = Self::SegmMut<'a>>
+    type Segments<'a>: 'a + IntoIterator<Item = Self::WriterSegm<'a>>
     where
         Self: 'a;
 
@@ -28,14 +23,24 @@ pub trait TrBuffIterWrite<T = u8> {
 
     type Err: Error;
 
-    /// Lend some segments for writing. The total length of these segments will
-    /// be no greater than the length given in the argument.
-    fn write_async(&mut self, length: usize) -> Self::WriteAsync<'_>;
+    /// Lend some segments for writing in an async manner. The total amount of
+    /// items is specified by the parameter `demand`.
+    fn write_async(
+        &mut self,
+        demand: &Demand<usize>,
+    ) -> Self::WriteAsync<'_>;
+
+    fn as_output(&mut self) -> impl TrOutput<T>
+    where
+        Self: Sized,
+    {
+        BuffWriteAsOutput::<&mut Self, Self, T>::new(self)
+    }
 }
 
-pub trait TrBuffIterTryWrite<T = u8>: TrBuffIterWrite<T> {
+pub trait TrBuffIterTryWrite<T = u8>: TrBuffWrite<T> {
     fn try_write(
         &mut self,
-        length: usize,
+        demand: &Demand<usize>,
     ) -> SomeOf<Self::Segments<'_>, Self::Err>;
 }

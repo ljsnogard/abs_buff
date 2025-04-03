@@ -13,20 +13,17 @@ use abs_sync::cancellation::{NonCancellableToken, TrCancellationToken, TrMayCanc
 
 use anylr::SomeOf;
 
-use crate::{
-    io::TrUnbufferedInput,
-    TrBuffIterRead, TrBuffSegmRef,
-};
+use crate::{Demand, TrBuffRead, TrBuffSegmRef, TrInput};
 
 pub struct BuffReadAsInput<B, R, T>(B, PhantomData<R>, PhantomData<[T]>)
 where
     B: BorrowMut<R>,
-    R: TrBuffIterRead<T>;
+    R: TrBuffRead<T>;
 
 impl<B, R, T> BuffReadAsInput<B, R, T>
 where
     B: BorrowMut<R>,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     pub const fn new(r: B) -> Self {
         BuffReadAsInput(r, PhantomData, PhantomData)
@@ -35,7 +32,7 @@ where
 
 impl<'a, R, T> From<&'a mut R> for BuffReadAsInput<&'a mut R, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     fn from(value: &'a mut R) -> Self {
         BuffReadAsInput::new(value)
@@ -44,19 +41,19 @@ where
 
 impl<R, T> From<R> for BuffReadAsInput<R, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     fn from(value: R) -> Self {
         BuffReadAsInput::new(value)
     }
 }
 
-impl<B, R, T> TrUnbufferedInput<T> for BuffReadAsInput<B, R, T>
+impl<B, R, T> TrInput<T> for BuffReadAsInput<B, R, T>
 where
     B: BorrowMut<R>,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
-    type Err = <R as TrBuffIterRead<T>>::Err;
+    type Err = <R as TrBuffRead<T>>::Err;
 
     type ReadAsync<'a> = BuffReadInputAsync<'a, R, T>
     where
@@ -73,7 +70,7 @@ where
 
 pub struct BuffReadInputAsync<'a, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     reader_: &'a mut R,
     target_: &'a mut [MaybeUninit<T>],
@@ -81,7 +78,7 @@ where
 
 impl<'a, R, T> BuffReadInputAsync<'a, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     pub const fn new(
         reader: &'a mut R,
@@ -106,7 +103,7 @@ where
 
 impl<'a, R, T> IntoFuture for BuffReadInputAsync<'a, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     type IntoFuture = BuffReadInputFuture<'a, NonCancellableToken, R, T>;
     type Output = <Self::IntoFuture as Future>::Output;
@@ -119,9 +116,9 @@ where
 
 impl<'a, R, T> TrMayCancel<'a> for BuffReadInputAsync<'a, R, T>
 where
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
-    type MayCancelOutput = SomeOf<usize, <R as TrBuffIterRead<T>>::Err>;
+    type MayCancelOutput = SomeOf<usize, <R as TrBuffRead<T>>::Err>;
 
     fn may_cancel_with<'f, C: abs_sync::preludes::TrCancellationToken>(
         self,
@@ -137,7 +134,7 @@ where
 pub struct BuffReadInputFuture<'a, C, R, T>
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     reader_: &'a mut R,
     target_: &'a mut [MaybeUninit<T>],
@@ -148,7 +145,7 @@ where
 impl<'a, C, R, T> BuffReadInputFuture<'a, C, R, T>
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     pub const fn new(
         reader: &'a mut R,
@@ -167,9 +164,9 @@ where
 impl<'a, C, R, T> Future for BuffReadInputFuture<'a, C, R, T>
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
-    type Output = SomeOf<usize, <R as TrBuffIterRead<T>>::Err>;
+    type Output = SomeOf<usize, <R as TrBuffRead<T>>::Err>;
 
     fn poll(
         mut self: Pin<&mut Self>,
@@ -203,15 +200,15 @@ where
 struct FutImpl<'a, C, R, T>(Pin<&'a mut BuffReadInputFuture<'a, C, R, T>>)
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>;
+    R: TrBuffRead<T>;
 
 impl<C, R, T> AsyncFnOnce<()> for FutImpl<'_, C, R, T>
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     type CallOnceFuture = impl Future<Output = Self::Output>;
-    type Output = SomeOf<usize, <R as TrBuffIterRead<T>>::Err>;
+    type Output = SomeOf<usize, <R as TrBuffRead<T>>::Err>;
 
     #[inline]
     extern "rust-call" fn async_call_once(
@@ -230,7 +227,7 @@ where
 impl<'a, C, R, T> FutImpl<'a, C, R, T>
 where
     C: TrCancellationToken,
-    R: TrBuffIterRead<T>,
+    R: TrBuffRead<T>,
 {
     pub const fn new(f: Pin<&'a mut BuffReadInputFuture<'a, C, R, T>>) -> Self {
         FutImpl(f)
@@ -240,9 +237,9 @@ where
         reader: &'f mut R,
         target: &'f mut [MaybeUninit<T>],
         mut cancel: Pin<&'f mut C>,
-    ) -> SomeOf<usize, <R as TrBuffIterRead<T>>::Err> {
+    ) -> SomeOf<usize, <R as TrBuffRead<T>>::Err> {
         return reader
-            .read_async(target.len())
+            .read_async(&Demand::at_most(target.len()))
             .may_cancel_with(cancel.as_mut())
             .await
             .map_left(|segms| fill_buff_with_segms(segms, target));

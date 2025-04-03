@@ -1,24 +1,18 @@
-﻿use core::{
-    error::Error,
-    iter::IntoIterator,
-};
+﻿use core::error::Error;
 
 use abs_sync::cancellation::TrMayCancel;
 
 use anylr::SomeOf;
 
-use crate::{
-    io::TrUnbufferedInput,
-    TrBuffSegmRef,
-};
+use crate::{BuffReadAsInput, Demand, TrInput, TrBuffSegmRef};
 
 /// Buffer that will emit zero or more segments for consumer (and update cursor)
-pub trait TrBuffIterRead<T = u8> {
-    type SegmRef<'a>: 'a + TrBuffSegmRef<T>
+pub trait TrBuffRead<T = u8> {
+    type ReaderSegm<'a>: 'a + TrBuffSegmRef<T>
     where
         Self: 'a;
 
-    type Segments<'a>: IntoIterator<Item = Self::SegmRef<'a>>
+    type Segments<'a>: 'a + IntoIterator<Item = Self::ReaderSegm<'a>>
     where
         Self: 'a;
 
@@ -29,21 +23,24 @@ pub trait TrBuffIterRead<T = u8> {
 
     type Err: Error;
 
-    /// Borrow some segments for reading. The total length of these segments
-    /// will be no greater than the length given in the argument.
-    fn read_async(&mut self, length: usize) -> Self::ReadAsync<'_>;
+    /// Lend some segments for reading in async manner. The amount of items
+    /// is specified by the parameter `demand`.
+    fn read_async(
+        &mut self,
+        demand: &Demand<usize>,
+    ) -> Self::ReadAsync<'_>;
 
-    fn as_input(&mut self) -> impl TrUnbufferedInput<T>
+    fn as_input(&mut self) -> impl TrInput<T>
     where
         Self: Sized,
     {
-        crate::buff_read_as_input_::BuffReadAsInput::<&mut Self, Self, T>::new(self)
+        BuffReadAsInput::<&mut Self, Self, T>::new(self)
     }
 }
 
-pub trait TrBuffIterTryRead<T = u8>: TrBuffIterRead<T> {
+pub trait TrBuffIterTryRead<T = u8>: TrBuffRead<T> {
     fn try_read(
         &mut self,
-        length: usize,
+        demand: &Demand<usize>,
     ) -> SomeOf<Self::Segments<'_>, Self::Err>;
 }

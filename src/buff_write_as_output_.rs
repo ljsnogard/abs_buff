@@ -13,20 +13,17 @@ use abs_sync::cancellation::{NonCancellableToken, TrCancellationToken, TrMayCanc
 
 use anylr::SomeOf;
 
-use crate::{
-    io::TrUnbufferedOutput,
-    TrBuffIterWrite, TrBuffSegmMut,
-};
+use crate::{Demand, TrBuffWrite, TrBuffSegmMut, TrOutput};
 
 pub struct BuffWriteAsOutput<B, W, T>(B, PhantomData<W>, PhantomData<[T]>)
 where
     B: BorrowMut<W>,
-    W: TrBuffIterWrite<T>;
+    W: TrBuffWrite<T>;
 
 impl<B, W, T> BuffWriteAsOutput<B, W, T>
 where
     B: BorrowMut<W>,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     pub const fn new(r: B) -> Self {
         BuffWriteAsOutput(r, PhantomData, PhantomData)
@@ -35,7 +32,7 @@ where
 
 impl<'a, W, T> From<&'a mut W> for BuffWriteAsOutput<&'a mut W, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     fn from(value: &'a mut W) -> Self {
         BuffWriteAsOutput::<&'a mut W, W, T>::new(value)
@@ -44,19 +41,19 @@ where
 
 impl<W, T> From<W> for BuffWriteAsOutput<W, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     fn from(value: W) -> Self {
         BuffWriteAsOutput::new(value)
     }
 }
 
-impl<B, W, T> TrUnbufferedOutput<T> for BuffWriteAsOutput<B, W, T>
+impl<B, W, T> TrOutput<T> for BuffWriteAsOutput<B, W, T>
 where
     B: BorrowMut<W>,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
-    type Err = <W as TrBuffIterWrite<T>>::Err;
+    type Err = <W as TrBuffWrite<T>>::Err;
 
     type WriteAsync<'a> = BuffWriteOutputAsync<'a, W, T>
     where
@@ -73,7 +70,7 @@ where
 
 pub struct BuffWriteOutputAsync<'a, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     writer_: &'a mut W,
     source_: &'a [MaybeUninit<T>],
@@ -81,7 +78,7 @@ where
 
 impl<'a, W, T> BuffWriteOutputAsync<'a, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     pub const fn new(writer: &'a mut W, source: &'a [MaybeUninit<T>]) -> Self {
         BuffWriteOutputAsync {
@@ -103,7 +100,7 @@ where
 
 impl<'a, W, T> IntoFuture for BuffWriteOutputAsync<'a, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     type IntoFuture = BuffWriteOutputFuture<'a, NonCancellableToken, W, T>;
     type Output = <Self::IntoFuture as Future>::Output;
@@ -121,7 +118,7 @@ where
 
 impl<'a, W, T> TrMayCancel<'a> for BuffWriteOutputAsync<'a, W, T>
 where
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     type MayCancelOutput = <Self as IntoFuture>::Output;
 
@@ -140,7 +137,7 @@ where
 pub struct BuffWriteOutputFuture<'a, C, W, T>
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     writer_: &'a mut W,
     source_: &'a [MaybeUninit<T>],
@@ -151,7 +148,7 @@ where
 impl<'a, C, W, T> BuffWriteOutputFuture<'a, C, W, T>
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     pub const fn new(
         writer: &'a mut W,
@@ -170,9 +167,9 @@ where
 impl<'a, C, W, T> Future for BuffWriteOutputFuture<'a, C, W, T>
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
-    type Output = SomeOf<usize, <W as TrBuffIterWrite<T>>::Err>;
+    type Output = SomeOf<usize, <W as TrBuffWrite<T>>::Err>;
 
     fn poll(
         mut self: Pin<&mut Self>,
@@ -206,15 +203,15 @@ where
 struct FutImpl<'a, C, W, T>(Pin<&'a mut BuffWriteOutputFuture<'a, C, W, T>>)
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>;
+    W: TrBuffWrite<T>;
 
 impl<C, W, T> AsyncFnOnce<()> for FutImpl<'_, C, W, T>
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     type CallOnceFuture = impl Future<Output = Self::Output>;
-    type Output = SomeOf<usize, <W as TrBuffIterWrite<T>>::Err>;
+    type Output = SomeOf<usize, <W as TrBuffWrite<T>>::Err>;
 
     #[inline]
     extern "rust-call" fn async_call_once(
@@ -233,7 +230,7 @@ where
 impl<'a, C, W, T> FutImpl<'a, C, W, T>
 where
     C: TrCancellationToken,
-    W: TrBuffIterWrite<T>,
+    W: TrBuffWrite<T>,
 {
     pub const fn new(f: Pin<&'a mut BuffWriteOutputFuture<'a, C, W, T>>) -> Self {
         FutImpl(f)
@@ -243,9 +240,9 @@ where
         writer: &'f mut W,
         source: &'f [MaybeUninit<T>],
         mut cancel: Pin<&'f mut C>,
-    ) -> SomeOf<usize, <W as TrBuffIterWrite<T>>::Err> {
+    ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err> {
         return writer
-            .write_async(source.len())
+            .write_async(&Demand::at_most(source.len()))
             .may_cancel_with(cancel.as_mut())
             .await
             .map_left(|segms| dump_buff_into_segms(source, segms));

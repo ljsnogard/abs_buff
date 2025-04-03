@@ -18,6 +18,7 @@ pub mod io;
 mod buff_read_as_input_;
 mod buff_write_as_output_;
 mod buff_segm_;
+mod demand_;
 mod peeker_;
 mod reader_;
 mod writer_;
@@ -25,9 +26,11 @@ mod writer_;
 pub use buff_read_as_input_::{BuffReadAsInput, BuffReadInputAsync, BuffReadInputFuture};
 pub use buff_write_as_output_::{BuffWriteAsOutput, BuffWriteOutputAsync, BuffWriteOutputFuture};
 pub use buff_segm_::{TrBuffSegmView, TrBuffSegmMut, TrBuffSegmRef};
-pub use peeker_::{TrBuffIterPeek, TrBuffIterTryPeek};
-pub use reader_::{TrBuffIterRead, TrBuffIterTryRead};
-pub use writer_::{TrBuffIterWrite, TrBuffIterTryWrite};
+pub use demand_::Demand;
+pub use io::{TrInput, TrOutput};
+pub use peeker_::{TrBuffPeek, TrBuffIterTryPeek};
+pub use reader_::{TrBuffRead, TrBuffIterTryRead};
+pub use writer_::{TrBuffWrite, TrBuffIterTryWrite};
 
 pub mod x_deps {
     pub use abs_sync;

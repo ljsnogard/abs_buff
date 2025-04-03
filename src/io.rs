@@ -8,7 +8,7 @@ use abs_sync::cancellation::TrMayCancel;
 use anylr::SomeOf;
 
 /// Unbuffered input device
-pub trait TrUnbufferedInput<T = u8> {
+pub trait TrInput<T = u8> {
     type Err : Error;
 
     type ReadAsync<'a>:
@@ -25,7 +25,7 @@ pub trait TrUnbufferedInput<T = u8> {
 }
 
 /// Unbuffered output device
-pub trait TrUnbufferedOutput<T = u8> {
+pub trait TrOutput<T = u8> {
     type Err : Error;
 
     type WriteAsync<'a>:
