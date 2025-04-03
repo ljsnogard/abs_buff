@@ -10,7 +10,6 @@ use core::{
 };
 
 use abs_sync::cancellation::{NonCancellableToken, TrCancellationToken, TrMayCancel};
-
 use anylr::SomeOf;
 
 use crate::{Demand, TrBuffRead, TrBuffSegmRef, TrInput};
@@ -120,7 +119,7 @@ where
 {
     type MayCancelOutput = SomeOf<usize, <R as TrBuffRead<T>>::Err>;
 
-    fn may_cancel_with<'f, C: abs_sync::preludes::TrCancellationToken>(
+    fn may_cancel_with<'f, C: TrCancellationToken>(
         self,
         cancel: Pin<&'f mut C>,
     ) -> impl IntoFuture<Output = Self::MayCancelOutput>

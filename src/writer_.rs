@@ -38,7 +38,7 @@ pub trait TrBuffWrite<T = u8> {
     }
 }
 
-pub trait TrBuffIterTryWrite<T = u8>: TrBuffWrite<T> {
+pub trait TrBuffTryWrite<T = u8>: TrBuffWrite<T> {
     fn try_write(
         &mut self,
         demand: &Demand<usize>,

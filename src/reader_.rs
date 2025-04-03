@@ -38,7 +38,7 @@ pub trait TrBuffRead<T = u8> {
     }
 }
 
-pub trait TrBuffIterTryRead<T = u8>: TrBuffRead<T> {
+pub trait TrBuffTryRead<T = u8>: TrBuffRead<T> {
     fn try_read(
         &mut self,
         demand: &Demand<usize>,

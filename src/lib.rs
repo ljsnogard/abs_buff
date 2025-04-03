@@ -28,9 +28,9 @@ pub use buff_write_as_output_::{BuffWriteAsOutput, BuffWriteOutputAsync, BuffWri
 pub use buff_segm_::{TrBuffSegmView, TrBuffSegmMut, TrBuffSegmRef};
 pub use demand_::Demand;
 pub use io::{TrInput, TrOutput};
-pub use peeker_::{TrBuffPeek, TrBuffIterTryPeek};
-pub use reader_::{TrBuffRead, TrBuffIterTryRead};
-pub use writer_::{TrBuffWrite, TrBuffIterTryWrite};
+pub use peeker_::{TrBuffPeek, TrBuffTryPeek};
+pub use reader_::{TrBuffRead, TrBuffTryRead};
+pub use writer_::{TrBuffWrite, TrBuffTryWrite};
 
 pub mod x_deps {
     pub use abs_sync;
