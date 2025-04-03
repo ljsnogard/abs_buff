@@ -1,9 +1,16 @@
+#[derive(Clone, Debug)]
 enum Amount<T> {
     AtLeast(T),
     AtMost(T),
     Between(T, T),
 }
 
+impl<T> Copy for Amount<T>
+where
+    T: Copy,
+{}
+
+#[derive(Clone, Debug)]
 pub struct Demand<T>(Amount<T>)
 where
     T: PartialOrd;
@@ -20,12 +27,12 @@ where
     }
 
     pub fn between(least: T, most: T) -> Self {
-        let inner = if PartialOrd::lt(&least, &most) {
+        let amount = if PartialOrd::lt(&least, &most) {
             Amount::Between(least, most)
         } else {
             Amount::Between(most, least)
         };
-        Demand(inner)
+        Demand(amount)
     }
 
     pub fn at_least(val: T) -> Self {
@@ -52,3 +59,8 @@ where
         }
     }
 }
+
+impl<T> Copy for Demand<T>
+where 
+    T: Copy + PartialOrd,
+{}
