@@ -12,12 +12,8 @@ pub trait TrBuffWrite<T = u8> {
     where
         Self: 'a;
 
-    type Segments<'a>: 'a + IntoIterator<Item = Self::WriterSegm<'a>>
-    where
-        Self: 'a;
-
     type WriteAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::Segments<'a>, Self::Err>>
+        MayCancelOutput = SomeOf<Self::WriterSegm<'a>, Self::Err>>
     where
         Self: 'a;
 
@@ -25,10 +21,10 @@ pub trait TrBuffWrite<T = u8> {
 
     /// Lend some segments for writing in an async manner. The total amount of
     /// items is specified by the parameter `demand`.
-    fn write_async(
-        &mut self,
-        demand: &Demand<usize>,
-    ) -> Self::WriteAsync<'_>;
+    fn write_async<'a>(
+        &'a mut self,
+        demand: Demand<usize>,
+    ) -> Self::WriteAsync<'a>;
 
     fn as_output(&mut self) -> impl TrOutput<T>
     where
@@ -39,8 +35,8 @@ pub trait TrBuffWrite<T = u8> {
 }
 
 pub trait TrBuffTryWrite<T = u8>: TrBuffWrite<T> {
-    fn try_write(
-        &mut self,
-        demand: &Demand<usize>,
-    ) -> SomeOf<Self::Segments<'_>, Self::Err>;
+    fn try_write<'a>(
+        &'a mut self,
+        demand: Demand<usize>,
+    ) -> SomeOf<Self::WriterSegm<'a>, Self::Err>;
 }

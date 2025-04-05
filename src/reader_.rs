@@ -1,7 +1,6 @@
 ﻿use core::error::Error;
 
 use abs_sync::cancellation::TrMayCancel;
-
 use anylr::SomeOf;
 
 use crate::{BuffReadAsInput, Demand, TrInput, TrBuffSegmRef};
@@ -12,12 +11,8 @@ pub trait TrBuffRead<T = u8> {
     where
         Self: 'a;
 
-    type Segments<'a>: 'a + IntoIterator<Item = Self::ReaderSegm<'a>>
-    where
-        Self: 'a;
-
     type ReadAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::Segments<'a>, Self::Err>>
+        MayCancelOutput = SomeOf<Self::ReaderSegm<'a>, Self::Err>>
     where
         Self: 'a;
 
@@ -25,10 +20,10 @@ pub trait TrBuffRead<T = u8> {
 
     /// Lend some segments for reading in async manner. The amount of items
     /// is specified by the parameter `demand`.
-    fn read_async(
-        &mut self,
-        demand: &Demand<usize>,
-    ) -> Self::ReadAsync<'_>;
+    fn read_async<'a>(
+        &'a mut self,
+        demand: Demand<usize>,
+    ) -> Self::ReadAsync<'a>;
 
     fn as_input(&mut self) -> impl TrInput<T>
     where
@@ -39,8 +34,8 @@ pub trait TrBuffRead<T = u8> {
 }
 
 pub trait TrBuffTryRead<T = u8>: TrBuffRead<T> {
-    fn try_read(
-        &mut self,
-        demand: &Demand<usize>,
-    ) -> SomeOf<Self::Segments<'_>, Self::Err>;
+    fn try_read<'a>(
+        &'a mut self,
+        demand: Demand<usize>,
+    ) -> SomeOf<Self::ReaderSegm<'a>, Self::Err>;
 }

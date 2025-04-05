@@ -1,17 +1,7 @@
-#[derive(Clone, Debug)]
-enum Amount<T> {
-    AtLeast(T),
-    AtMost(T),
-    Between(T, T),
-}
+use anylr::{abs::TrAnyLeftRight, Any};
 
-impl<T> Copy for Amount<T>
-where
-    T: Copy,
-{}
-
-#[derive(Clone, Debug)]
-pub struct Demand<T>(Amount<T>)
+#[derive(Debug)]
+pub struct Demand<T>(Any<T, T>)
 where
     T: PartialOrd;
 
@@ -23,44 +13,30 @@ where
     where
         T: Clone,
     {
-        Demand(Amount::Between(val.clone(), val))
+        Demand::between(val.clone(), val)
     }
 
     pub fn between(least: T, most: T) -> Self {
-        let amount = if PartialOrd::lt(&least, &most) {
-            Amount::Between(least, most)
+        Demand(if least < most {
+            Any::new_both(least, most)
         } else {
-            Amount::Between(most, least)
-        };
-        Demand(amount)
+            Any::new_both(most, least)
+        })
     }
 
-    pub fn at_least(val: T) -> Self {
-        Demand(Amount::AtLeast(val))
+    pub const fn at_least(val: T) -> Self {
+        Demand(Any::new_left(val))
     }
 
-    pub fn at_most(val: T) -> Self {
-        Demand(Amount::AtMost(val))
+    pub const fn at_most(val: T) -> Self {
+        Demand(Any::new_right(val))
     }
 
     pub fn least(&self) -> Option<&T> {
-        match &self.0 {
-            Amount::AtLeast(v) => Option::Some(v),
-            Amount::Between(v, _) => Option::Some(v),
-            _ => Option::None,
-        }
+        self.0.as_ref().pick_left()
     }
 
     pub fn most(&self) -> Option<&T> {
-        match &self.0 {
-            Amount::AtMost(v) => Option::Some(v),
-            Amount::Between(_, v) => Option::Some(v),
-            _ => Option::None,
-        }
+        self.0.as_ref().pick_right()
     }
 }
-
-impl<T> Copy for Demand<T>
-where 
-    T: Copy + PartialOrd,
-{}

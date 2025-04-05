@@ -1,7 +1,6 @@
 use core::{
     borrow::BorrowMut,
     future::{IntoFuture, Future},
-    iter::IntoIterator,
     marker::PhantomData,
     mem::MaybeUninit,
     pin::Pin,
@@ -237,31 +236,10 @@ where
         target: &'f mut [MaybeUninit<T>],
         mut cancel: Pin<&'f mut C>,
     ) -> SomeOf<usize, <R as TrBuffRead<T>>::Err> {
-        return reader
-            .read_async(&Demand::at_most(target.len()))
+        reader
+            .read_async(Demand::at_most(target.len()))
             .may_cancel_with(cancel.as_mut())
             .await
-            .map_left(|segms| fill_buff_with_segms(segms, target));
-
-        fn fill_buff_with_segms<'d, I, S, X>(
-            segments: I,
-            buffer: &'d mut [MaybeUninit<X>],
-        ) -> usize
-        where
-            I: IntoIterator<Item = S>,
-            S: TrBuffSegmRef<X>,
-        {
-            let mut copied = 0usize;
-            let buff_len = buffer.len();
-            for mut s in segments.into_iter() {
-                let target = &mut buffer[copied..buff_len - copied];
-                let c = s.fill_into_buff(target);
-                copied += c;
-                if copied == buff_len {
-                    break
-                }
-            }
-            copied
-        }
+            .map_left(|mut s| s.fill_into_buff(target))
     }
 }
