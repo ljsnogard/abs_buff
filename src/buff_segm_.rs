@@ -3,6 +3,7 @@
     cmp,
     mem::{self, MaybeUninit},
     ptr,
+    ops::{Deref, DerefMut},
 };
 
 pub trait TrBuffSegmView {
@@ -27,6 +28,11 @@ pub trait TrBuffSegmRef<T>
 where
     Self: TrBuffSegmView<Item = T>,
 {
+    type Slice<'a>: Deref<Target = [Self::Item]>
+    where
+        T: 'a,
+        Self: 'a;
+
     /// Take a sliced segment out from this segment with a length limited by
     /// the argument, reducing the length of this segment when the taken slice
     /// drops.
@@ -35,7 +41,7 @@ where
         length: usize,
     ) -> impl TrBuffSegmRef<T>;
 
-    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = &'a [Self::Item]>
+    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
     where
         T: 'a;
 
@@ -70,6 +76,11 @@ where
         AsMut<[MaybeUninit<T>]> + 
         BorrowMut<[MaybeUninit<T>]>,
 {
+    type Slice<'a>: DerefMut<Target = [Self::Item]>
+    where
+        T: 'a,
+        Self: 'a;
+
     /// Take a sliced segment out from this segment with a length limited by the
     /// the argument, reducing the length of this segment when the taken slice
     /// drops.
@@ -78,7 +89,7 @@ where
         length: usize,
     ) -> impl TrBuffSegmMut<T>;
 
-    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = &'a mut [Self::Item]>
+    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
     where
         T: 'a;
 
@@ -121,7 +132,7 @@ where
         }
         let mut parts = self.take_segm_mut(count);
         let mut copied = 0usize;
-        for dst in parts.iter_slices() {
+        for mut dst in parts.iter_slices() {
             let copy_len = dst.len();
             let src = &source[copied..copy_len];
             let src_head = (&src[0]) as *const MaybeUninit<T>;
