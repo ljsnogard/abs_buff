@@ -57,7 +57,7 @@ pub trait TrOutput<T = u8> {
     fn write_cloned_async<'a>(
         &'a mut self,
         source: &'a [T],
-    ) -> Self::WriteAsync<'a>
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
     where
         T: Clone,
     {

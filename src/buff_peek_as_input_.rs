@@ -11,7 +11,10 @@ use abs_sync::{
 };
 use anylr::SomeOf;
 
-use crate::{TrBuffPeek, TrBuffSegmRef, TrInput};
+use crate::{
+    buff_segm_as_input_::buff_segm_ref_read,
+    TrBuffPeek, TrBuffSegmRef, TrInput,
+};
 
 pub struct BuffPeekAsInput<B, P, T>
 where
@@ -98,7 +101,7 @@ where
     if let Option::Some(mut segment) = opt_segm {
         let prev_done = segment.take_segm_ref(input.offset_);
         drop(prev_done);
-        copied = segment.fill_into_buff(target);
+        copied = buff_segm_ref_read(&mut segment, target);
     };
     input.offset_ += copied;
     if let Option::Some(err) = opt_err {

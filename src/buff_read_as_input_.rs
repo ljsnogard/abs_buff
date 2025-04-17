@@ -11,7 +11,10 @@ use abs_sync::{
 };
 use anylr::SomeOf;
 
-use crate::{Demand, TrBuffRead, TrBuffSegmRef, TrInput};
+use crate::{
+    buff_segm_as_input_::buff_segm_ref_read,
+    Demand, TrBuffRead, TrInput,
+};
 
 pub struct BuffReadAsInput<B, R, T>(B, PhantomData<R>, PhantomData<[T]>)
 where
@@ -80,5 +83,5 @@ where
         .read_async(Demand::at_most(target.len()))
         .may_cancel_with(cancel)
         .await
-        .map_left(|mut s| s.fill_into_buff(target))
+        .map_left(|mut s| buff_segm_ref_read(&mut s, target))
 }

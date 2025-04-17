@@ -11,7 +11,10 @@ use abs_sync::{
 };
 use anylr::SomeOf;
 
-use crate::{Demand, TrBuffWrite, TrBuffSegmMut, TrOutput};
+use crate::{
+    buff_segm_as_output_::{buff_segm_mut_write, buff_segm_mut_write_cloned},
+    Demand, TrBuffWrite, TrOutput,
+};
 
 pub struct BuffWriteAsOutput<B, W, T>(B, PhantomData<W>, PhantomData<[T]>)
 where
@@ -25,6 +28,23 @@ where
 {
     pub const fn new(r: B) -> Self {
         BuffWriteAsOutput(r, PhantomData, PhantomData)
+    }
+
+    pub fn write_async<'a>(
+        &'a mut self,
+        source: &'a [MaybeUninit<T>],
+    ) -> BuffWriteOutputAsync<'a, W, T> {
+        BuffWriteOutputAsync(self.0.borrow_mut(), source)
+    }
+
+    pub fn write_cloned_async<'a>(
+        &'a mut self,
+        source: &'a [T],
+    ) -> BuffWriteOutputClonedAsync<'a, W, T>
+    where
+        T: Clone,
+    {
+        BuffWriteOutputClonedAsync(self.0.borrow_mut(), source)
     }
 }
 
@@ -58,11 +78,23 @@ where
         T: 'a,
         Self: 'a;
 
+    #[inline]
     fn write_async<'a>(
         &'a mut self,
         source: &'a [MaybeUninit<T>],
     ) -> Self::WriteAsync<'a> {
-        BuffWriteOutputAsync(self.0.borrow_mut(), source)
+        BuffWriteAsOutput::write_async(self, source)
+    }
+
+    #[inline]
+    fn write_cloned_async<'a>(
+        &'a mut self,
+        source: &'a [T],
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
+    where
+        T: Clone,
+    {
+        BuffWriteAsOutput::write_cloned_async(self, source)
     }
 }
 
@@ -80,5 +112,23 @@ where
         .write_async(Demand::at_most(source.len()))
         .may_cancel_with(cancel)
         .await
-        .map_left(|mut s| s.dump_from_slice(source))
+        .map_left(|mut s| buff_segm_mut_write(&mut s, source))
+}
+
+#[gen_may_cancel_future(BuffWriteOutputCloned)]
+async fn buff_write_output_cloned_async<'f, W, T, C>(
+    writer: &'f mut W,
+    source: &'f [T],
+    cancel: Pin<&'f mut C>,
+) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
+where 
+    W: TrBuffWrite<T>,
+    T: Clone,
+    C: TrCancellationToken,
+{
+    writer
+        .write_async(Demand::at_most(source.len()))
+        .may_cancel_with(cancel)
+        .await
+        .map_left(|mut s| buff_segm_mut_write_cloned(&mut s, source))
 }

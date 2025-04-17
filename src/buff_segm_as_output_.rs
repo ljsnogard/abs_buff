@@ -1,0 +1,178 @@
+use core::{
+    borrow::BorrowMut,
+    cmp,
+    convert::Infallible,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    pin::Pin,
+    ptr
+};
+
+use abs_sync::{
+    cancellation::TrCancellationToken,
+    gen_mcf_macro::gen_may_cancel_future,
+};
+
+use anylr::SomeOf;
+
+use crate::{
+    buff_segm_::{TrBuffSegmMut, TrBuffSegmView},
+    io::TrOutput,
+};
+
+pub struct BuffSegmMutOutput<B, S, T>
+where
+    B: BorrowMut<S>,
+    S: TrBuffSegmMut<T>,
+{
+    _mark_s_: PhantomData<S>,
+    _mark_t_: PhantomData<T>,
+    segment_: B,
+}
+
+impl<B, S, T> BuffSegmMutOutput<B, S, T>
+where
+    B: BorrowMut<S>,
+    S: TrBuffSegmMut<T>,
+{
+    pub const fn new(segment: B) -> Self {
+        BuffSegmMutOutput {
+            _mark_s_: PhantomData,
+            _mark_t_: PhantomData,
+            segment_: segment,
+        }
+    }
+
+    pub fn write<'a>(&'a mut self, source: &'a [MaybeUninit<T>]) -> usize {
+        self::buff_segm_mut_write(self.segment_.borrow_mut(), source)
+    }
+
+    pub fn write_cloned<'a>(&'a mut self, source: &'a [T]) -> usize
+    where
+        T: Clone
+    {
+        self::buff_segm_mut_write_cloned(self.segment_.borrow_mut(), source)
+    }
+
+    pub fn write_async<'a>(
+        &'a mut self,
+        source: &'a [MaybeUninit<T>],
+    ) -> BuffSegmMutOutputAsync<'a, S, T> {
+        BuffSegmMutOutputAsync(self.segment_.borrow_mut(), source)
+    }
+
+    pub fn write_cloned_async<'a>(
+        &'a mut self,
+        source: &'a [T],
+    ) -> BuffSegmMutOutputClonedAsync<'a, S, T>
+    where
+        T: Clone,
+    {
+        BuffSegmMutOutputClonedAsync(self.segment_.borrow_mut(), source)
+    }
+}
+
+impl<B, S, T> TrOutput<T> for BuffSegmMutOutput<B, S, T>
+where
+    B: BorrowMut<S>,
+    S: TrBuffSegmMut<T>,
+{
+    type Err = Infallible;
+    type WriteAsync<'a> = BuffSegmMutOutputAsync<'a, S, T> where Self: 'a;
+
+    #[inline]
+    fn write_async<'a>(
+        &'a mut self,
+        source: &'a [MaybeUninit<T>],
+    ) -> Self::WriteAsync<'a> {
+        BuffSegmMutOutput::write_async(self, source)
+    }
+}
+
+#[gen_may_cancel_future(BuffSegmMutOutput)]
+async fn buff_segm_output_async<'f, S, T, C>(
+    segm_mut: &'f mut S,
+    source: &'f [MaybeUninit<T>],
+    _: Pin<&'f mut C>,
+) -> SomeOf<usize, Infallible>
+where
+    S: TrBuffSegmMut<T>,
+    C: TrCancellationToken,
+{
+    SomeOf::new_left(buff_segm_mut_write(segm_mut, source))
+}
+
+#[gen_may_cancel_future(BuffSegmMutOutputCloned)]
+async fn buff_segm_output_cloned_async<'f, S, T, C>(
+    segm_mut: &'f mut S,
+    source: &'f [T],
+    _: Pin<&'f mut C>,
+) -> SomeOf<usize, Infallible>
+where
+    S: TrBuffSegmMut<T>,
+    T: Clone,
+    C: TrCancellationToken,
+{
+    SomeOf::new_left(buff_segm_mut_write_cloned(segm_mut, source))
+}
+
+pub(crate) fn buff_segm_mut_write<'f, S, T>(
+    segm_mut: &'f mut S,
+    source: &'f [MaybeUninit<T>],
+) -> usize
+where
+    S: TrBuffSegmMut<T>,
+{
+    let count = cmp::min(source.len(), segm_mut.len());
+    if count == 0 {
+        return count;
+    }
+    let mut parts = segm_mut.take_segm_mut(count);
+    let mut copied = 0usize;
+    for mut dst in parts.iter_slices() {
+        let copy_len = dst.len();
+        let src = &source[copied..copy_len];
+        let src_head = (&src[0]) as *const MaybeUninit<T>;
+        let dst_head = (&mut dst[0]) as *mut MaybeUninit<T>;
+
+        // This is sound because it is semantically a move operation since `src`
+        // will drop and convert the "copied" items into `MaybeUninit`
+        unsafe { ptr::copy_nonoverlapping(src_head, dst_head, copy_len) };
+        copied += copy_len;
+    }
+    copied
+}
+
+pub(crate) fn buff_segm_mut_write_cloned<'f, S, T>(
+    segm_mut: &'f mut S,
+    source: &'f [T],
+) -> usize
+where
+    S: TrBuffSegmMut<T>,
+    T: Clone,
+{
+    let mut dst = segm_mut.take_segm_mut(source.len());
+    let count = dst.len();
+    if count == 0 {
+        return count;
+    }
+    let dst: &mut [MaybeUninit<T>] = dst.borrow_mut();
+    let src = &source[..count];
+
+    // If `T: Clone` needs drop, we must preserve the clone semantic when 
+    // copying into the segment. This promises the correct behaviours when
+    // cloning items like `Rc` or `Arc`
+    if mem::needs_drop::<T>() {
+        for i in 0..count {
+            let m = &mut dst[i];
+            m.write(src[i].clone());
+        }
+    } else {
+        let dst = unsafe {
+            let p = dst as *mut _ as *mut [T];
+            &mut *p
+        };
+        dst.clone_from_slice(src);
+    }
+    count
+}
