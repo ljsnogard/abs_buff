@@ -14,3 +14,4 @@ readme = "README.md"
 [dependencies]
 abs_sync = { git = "https://github.com/ljsnogard/abs_sync.git", branch = "dev/0.2.0" }
 anylr = { git = "https://github.com/ljsnogard/anylr.rs.git" }
+gen_mcf_macro = { git = "https://github.com/ljsnogard/gen_mcf_macro.rs.git", tag = "0.1.0" }

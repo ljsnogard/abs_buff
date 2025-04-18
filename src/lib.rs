@@ -13,6 +13,8 @@
 #[cfg(test)]
 extern crate std;
 
+pub use gen_mcf_macro::gen_may_cancel_future;
+
 pub mod io;
 
 mod buff_peek_as_input_;
@@ -52,4 +54,5 @@ pub use writer_::{TrBuffWrite, TrBuffTryWrite};
 pub mod x_deps {
     pub use abs_sync;
     pub use anylr;
+    pub use gen_mcf_macro;
 }
