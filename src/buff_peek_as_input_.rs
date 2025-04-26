@@ -5,11 +5,9 @@ use core::{
     pin::Pin,
 };
 
-use abs_sync::{
-    cancellation::{TrCancellationToken, TrMayCancel},
-    gen_mcf_macro::gen_may_cancel_future,
-};
+use abs_sync::cancellation::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
+use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_input_::buff_segm_ref_read,

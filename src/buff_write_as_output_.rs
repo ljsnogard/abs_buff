@@ -5,11 +5,9 @@ use core::{
     pin::Pin,
 };
 
-use abs_sync::{
-    cancellation::{TrCancellationToken, TrMayCancel},
-    gen_mcf_macro::gen_may_cancel_future,
-};
+use abs_sync::cancellation::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
+use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_output_::{buff_segm_mut_write, buff_segm_mut_write_cloned},
