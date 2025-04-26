@@ -27,6 +27,7 @@ mod demand_;
 mod peeker_;
 mod reader_;
 mod writer_;
+mod slice_;
 
 pub use buff_peek_as_input_::{
     BuffPeekAsInput, BuffPeekInputAsync, BuffPeekInputFuture,
