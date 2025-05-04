@@ -6,6 +6,8 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(unboxed_closures)]
 
+#![feature(let_chains)]
+
 #![no_std]
 
 // We always pull in `std` during tests, because it's just easier
@@ -27,7 +29,6 @@ mod demand_;
 mod peeker_;
 mod reader_;
 mod writer_;
-mod slice_;
 
 pub use buff_peek_as_input_::{
     BuffPeekAsInput, BuffPeekInputAsync, BuffPeekInputFuture,
@@ -40,10 +41,10 @@ pub use buff_write_as_output_::{
 };
 pub use buff_segm_::{TrBuffSegmView, TrBuffSegmMut, TrBuffSegmRef};
 pub use buff_segm_as_input_::{
-    BuffSegmRefInput, BuffSegmRefInputAsync, BuffSegmRefInputFuture,
+    BuffSegmRefAsInput, BuffSegmRefInputAsync, BuffSegmRefInputFuture,
 };
 pub use buff_segm_as_output_::{
-    BuffSegmMutOutput, BuffSegmMutOutputAsync, BuffSegmMutOutputFuture,
+    BuffSegmMutAsOutput, BuffSegmMutOutputAsync, BuffSegmMutOutputFuture,
     BuffSegmMutOutputClonedAsync, BuffSegmMutOutputClonedFuture,
 };
 pub use demand_::Demand;

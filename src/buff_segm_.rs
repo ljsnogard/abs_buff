@@ -1,22 +1,21 @@
 ﻿use core::{
-    borrow::BorrowMut,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
 
-use crate::{BuffSegmRefInput, BuffSegmMutOutput, TrInput, TrOutput};
+use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, Demand, TrInput, TrOutput};
 
 pub trait TrBuffSegmView {
     type Item: Sized;
 
-    /// Returns if the elements are all consumed, or never existing.
+    /// Returns true if no available items to consume, false otherwise.
     fn is_empty(&self) -> bool;
 
     /// The items count of the unconsumed part of the segment.
     fn len(&self) -> usize;
 
     /// Returns the capacity of the segment, no matter the elements are
-    /// consumed or not. This is usually used by the reclaim function.
+    /// consumed or not.
     fn capacity(&self) -> usize;
 
     /// Iterate over the elements of the internal buffer retained by the segment
@@ -33,13 +32,18 @@ where
         T: 'a,
         Self: 'a;
 
-    /// Take a sliced segment out from this segment with a length limited by
-    /// the argument, reducing the length of this segment when the taken slice
-    /// drops.
-    fn take_segm_ref(
-        &mut self,
-        length: usize,
-    ) -> impl TrBuffSegmRef<T>;
+    type Segm<'a>: TrBuffSegmRef<T>
+    where
+        T: 'a,
+        Self: 'a;
+
+    /// Take a slice starting from the beginning out of this segment, length
+    /// specified by the demand argument, reducing the length of this segment
+    /// when the taken slice drops.
+    fn take_segm_ref<'a>(
+        &'a mut self,
+        length: Demand<usize>,
+    ) -> Option<Self::Segm<'a>>;
 
     fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
     where
@@ -49,28 +53,31 @@ where
     where
         Self: Sized,
     {
-        BuffSegmRefInput::<&mut Self, Self, T>::new(self)
+        BuffSegmRefAsInput::<&mut Self, Self, T>::new(self)
     }
 }
 
 pub trait TrBuffSegmMut<T>
 where
-    Self: TrBuffSegmView<Item = MaybeUninit<T>> +
-        AsMut<[MaybeUninit<T>]> + 
-        BorrowMut<[MaybeUninit<T>]>,
+    Self: TrBuffSegmView<Item = MaybeUninit<T>>,
 {
     type Slice<'a>: DerefMut<Target = [Self::Item]>
     where
         T: 'a,
         Self: 'a;
 
-    /// Take a sliced segment out from this segment with a length limited by the
-    /// the argument, reducing the length of this segment when the taken slice
-    /// drops.
-    fn take_segm_mut(
-        &mut self, 
-        length: usize,
-    ) -> impl TrBuffSegmMut<T>;
+    type Segm<'a>: TrBuffSegmMut<T>
+    where
+        T: 'a,
+        Self: 'a;
+
+    /// Take a slice starting from the beginning out of this segment, length
+    /// specified by the demand argument, reducing the length of this segment
+    /// when the taken slice drops.
+    fn take_segm_mut<'a>(
+        &'a mut self, 
+        length: Demand<usize>,
+    ) -> Option<Self::Segm<'a>>;
 
     fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
     where
@@ -80,6 +87,6 @@ where
     where
         Self: Sized,
     {
-        BuffSegmMutOutput::<&mut Self, Self, T>::new(self)
+        BuffSegmMutAsOutput::<&mut Self, Self, T>::new(self)
     }
 }

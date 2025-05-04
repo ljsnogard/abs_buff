@@ -1,6 +1,5 @@
 use core::{
     borrow::BorrowMut,
-    cmp,
     convert::Infallible,
     marker::PhantomData,
     mem::MaybeUninit,
@@ -14,10 +13,10 @@ use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_::TrBuffSegmRef,
-    io::TrInput,
+    io::TrInput, Demand,
 };
 
-pub struct BuffSegmRefInput<B, S, T>
+pub struct BuffSegmRefAsInput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmRef<T>,
@@ -27,13 +26,13 @@ where
     segment_: B,
 }
 
-impl<B, S, T> BuffSegmRefInput<B, S, T>
+impl<B, S, T> BuffSegmRefAsInput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmRef<T>,
 {
     pub const fn new(segment: B) -> Self {
-        BuffSegmRefInput {
+        BuffSegmRefAsInput {
             _mark_s_: PhantomData,
             _mark_t_: PhantomData,
             segment_: segment,
@@ -55,7 +54,7 @@ where
     }
 }
 
-impl<B, S, T> TrInput<T> for BuffSegmRefInput<B, S, T>
+impl<B, S, T> TrInput<T> for BuffSegmRefAsInput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmRef<T>,
@@ -68,7 +67,7 @@ where
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
     ) -> Self::ReadAsync<'a> {
-        BuffSegmRefInput::read_async(self, target)
+        BuffSegmRefAsInput::read_async(self, target)
     }
 }
 
@@ -93,11 +92,10 @@ where
     S: TrBuffSegmRef<T>,
     T: Sized,
 {
-    let count = cmp::min(target.len(), segment.len());
-    if count == 0 {
-        return count;
-    }
-    let mut parts = segment.take_segm_ref(count);
+    let length = Demand::at_most(target.len());
+    let Option::Some(mut parts) = segment.take_segm_ref(length) else {
+        return 0;
+    };
     let mut copied = 0usize;
     for src in parts.iter_slices() {
         let copy_len = src.len();

@@ -1,6 +1,5 @@
 use core::{
     borrow::BorrowMut,
-    cmp,
     convert::Infallible,
     marker::PhantomData,
     mem::{self, MaybeUninit},
@@ -12,12 +11,9 @@ use abs_sync::cancellation::TrCancellationToken;
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
-use crate::{
-    buff_segm_::{TrBuffSegmMut, TrBuffSegmView},
-    io::TrOutput,
-};
+use crate::{Demand, TrBuffSegmMut, TrOutput};
 
-pub struct BuffSegmMutOutput<B, S, T>
+pub struct BuffSegmMutAsOutput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmMut<T>,
@@ -27,13 +23,13 @@ where
     segment_: B,
 }
 
-impl<B, S, T> BuffSegmMutOutput<B, S, T>
+impl<B, S, T> BuffSegmMutAsOutput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmMut<T>,
 {
     pub const fn new(segment: B) -> Self {
-        BuffSegmMutOutput {
+        BuffSegmMutAsOutput {
             _mark_s_: PhantomData,
             _mark_t_: PhantomData,
             segment_: segment,
@@ -69,7 +65,7 @@ where
     }
 }
 
-impl<B, S, T> TrOutput<T> for BuffSegmMutOutput<B, S, T>
+impl<B, S, T> TrOutput<T> for BuffSegmMutAsOutput<B, S, T>
 where
     B: BorrowMut<S>,
     S: TrBuffSegmMut<T>,
@@ -82,7 +78,7 @@ where
         &'a mut self,
         source: &'a [MaybeUninit<T>],
     ) -> Self::WriteAsync<'a> {
-        BuffSegmMutOutput::write_async(self, source)
+        BuffSegmMutAsOutput::write_async(self, source)
     }
 }
 
@@ -114,17 +110,16 @@ where
 }
 
 pub(crate) fn buff_segm_mut_write<'f, S, T>(
-    segm_mut: &'f mut S,
+    segment: &'f mut S,
     source: &'f [MaybeUninit<T>],
 ) -> usize
 where
     S: TrBuffSegmMut<T>,
 {
-    let count = cmp::min(source.len(), segm_mut.len());
-    if count == 0 {
-        return count;
-    }
-    let mut parts = segm_mut.take_segm_mut(count);
+    let length = Demand::at_most(source.len());
+    let Option::Some(mut parts) = segment.take_segm_mut(length) else {
+        return 0
+    };
     let mut copied = 0usize;
     for mut dst in parts.iter_slices() {
         let copy_len = dst.len();
@@ -141,35 +136,41 @@ where
 }
 
 pub(crate) fn buff_segm_mut_write_cloned<'f, S, T>(
-    segm_mut: &'f mut S,
+    segment: &'f mut S,
     source: &'f [T],
 ) -> usize
 where
     S: TrBuffSegmMut<T>,
     T: Clone,
 {
-    let mut dst = segm_mut.take_segm_mut(source.len());
-    let count = dst.len();
-    if count == 0 {
-        return count;
-    }
-    let dst: &mut [MaybeUninit<T>] = dst.borrow_mut();
-    let src = &source[..count];
+    let length = Demand::at_most(source.len());
+    let Option::Some(mut parts) = segment.take_segm_mut(length) else {
+        return 0
+    };
+    let mut copied = 0usize;
 
     // If `T: Clone` needs drop, we must preserve the clone semantic when 
     // copying into the segment. This promises the correct behaviours when
     // cloning items like `Rc` or `Arc`
     if mem::needs_drop::<T>() {
-        for i in 0..count {
-            let m = &mut dst[i];
-            m.write(src[i].clone());
+        for mut dst in parts.iter_slices() {
+            let src = &source[copied..];
+            for i in 0..dst.len() {
+                let m = &mut dst[i];
+                m.write(src[i].clone());
+            }
+            copied += dst.len()
         }
     } else {
-        let dst = unsafe {
-            let p = dst as *mut _ as *mut [T];
-            &mut *p
-        };
-        dst.clone_from_slice(src);
+        for mut dst in parts.iter_slices() {
+            let dst = unsafe {
+                let p = (&mut *dst) as *mut _ as *mut [T];
+                &mut *p
+            };
+            let src = &source[copied..copied + dst.len()];
+            dst.clone_from_slice(src);
+            copied += dst.len();
+        }
     }
-    count
+    copied
 }
