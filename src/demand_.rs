@@ -33,6 +33,7 @@ where
     pub const fn least(&self) -> Option<&T> {
         match &self.0 {
             Bound::Lower(l) => Option::Some(l),
+            Bound::Exact(x) => Option::Some(x),
             Bound::Range(l, _)  => Option::Some(l),
             _ => Option::None,
         }
@@ -64,6 +65,7 @@ where
     pub const fn most(&self) -> Option<&T> {
         match &self.0 {
             Bound::Upper(u) => Option::Some(u),
+            Bound::Exact(x) => Option::Some(x),
             Bound::Range(_, u ) => Option::Some(u),
             _ => Option::None,
         }

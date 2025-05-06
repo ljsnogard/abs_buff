@@ -1,8 +1,6 @@
-﻿use core::{
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-};
+﻿use core::mem::MaybeUninit;
 
+use abs_iter::{TrMutSliceLike, TrSliceLike};
 use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, Demand, TrInput, TrOutput};
 
 pub trait TrBuffSegmView {
@@ -27,7 +25,7 @@ pub trait TrBuffSegmRef<T>
 where
     Self: TrBuffSegmView<Item = T>,
 {
-    type Slice<'a>: Deref<Target = [Self::Item]>
+    type Slice<'a>: TrSliceLike<Elem = T>
     where
         T: 'a,
         Self: 'a;
@@ -45,10 +43,10 @@ where
         length: Demand<usize>,
     ) -> Option<Self::Segm<'a>>;
 
+    /// Iterate the unconsumed slices.
     fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
     where
         T: 'a;
-
     fn as_input(&mut self) -> impl TrInput<T> 
     where
         Self: Sized,
@@ -61,7 +59,7 @@ pub trait TrBuffSegmMut<T>
 where
     Self: TrBuffSegmView<Item = MaybeUninit<T>>,
 {
-    type Slice<'a>: DerefMut<Target = [Self::Item]>
+    type Slice<'a>: TrMutSliceLike<Elem = MaybeUninit<T>>
     where
         T: 'a,
         Self: 'a;

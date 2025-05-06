@@ -54,6 +54,7 @@ pub use reader_::{TrBuffRead, TrBuffTryRead};
 pub use writer_::{TrBuffWrite, TrBuffTryWrite};
 
 pub mod x_deps {
+    pub use abs_iter;
     pub use abs_sync;
     pub use anylr;
     pub use gen_mcf_macro;

@@ -7,6 +7,7 @@ use core::{
     ptr
 };
 
+use abs_iter::TrSliceLike;
 use abs_sync::cancellation::TrCancellationToken;
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
@@ -98,6 +99,7 @@ where
     };
     let mut copied = 0usize;
     for src in parts.iter_slices() {
+        let src = src.as_slice();
         let copy_len = src.len();
         let dst = &mut target[copied..copy_len];
         let src_head = (&src[0]) as *const T;

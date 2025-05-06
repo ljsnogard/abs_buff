@@ -7,6 +7,7 @@ use core::{
     ptr
 };
 
+use abs_iter::TrMutSliceLike;
 use abs_sync::cancellation::TrCancellationToken;
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
@@ -122,6 +123,7 @@ where
     };
     let mut copied = 0usize;
     for mut dst in parts.iter_slices() {
+        let dst = dst.as_slice_mut();
         let copy_len = dst.len();
         let src = &source[copied..copy_len];
         let src_head = (&src[0]) as *const MaybeUninit<T>;
@@ -154,6 +156,7 @@ where
     // cloning items like `Rc` or `Arc`
     if mem::needs_drop::<T>() {
         for mut dst in parts.iter_slices() {
+            let dst = dst.as_slice_mut();
             let src = &source[copied..];
             for i in 0..dst.len() {
                 let m = &mut dst[i];
@@ -164,7 +167,7 @@ where
     } else {
         for mut dst in parts.iter_slices() {
             let dst = unsafe {
-                let p = (&mut *dst) as *mut _ as *mut [T];
+                let p = dst.as_slice_mut() as *mut _ as *mut [T];
                 &mut *p
             };
             let src = &source[copied..copied + dst.len()];
