@@ -4,7 +4,7 @@ use core::{
     ptr,
 };
 
-use abs_sync::cancellation::TrMayCancel;
+use abs_sync::may_cancel::TrMayCancel;
 
 use anylr::SomeOf;
 

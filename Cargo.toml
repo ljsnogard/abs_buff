@@ -1,6 +1,6 @@
 [package]
 name = "abs_buff"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 authors = ["lino <lino_snsalias@outlook.com>"]
@@ -13,6 +13,6 @@ readme = "README.md"
 
 [dependencies]
 abs_iter = { git = "https://github.com/ljsnogard/abs_iter.git", branch = "main" }
-abs_sync = { git = "https://github.com/ljsnogard/abs_sync.git", branch = "dev/0.2.0" }
-anylr = { git = "https://github.com/ljsnogard/anylr.rs.git" }
-gen_mcf_macro = { git = "https://github.com/ljsnogard/gen_mcf_macro.rs.git", tag = "0.1.0" }
+abs_sync = { git = "https://github.com/ljsnogard/abs_sync.git", branch = "dev/0.3.0" }
+anylr = { version = "0.1.0" }
+gen_mcf_macro = { git = "https://github.com/ljsnogard/gen_mcf_macro.rs.git", branch = "dev/0.3.0" }

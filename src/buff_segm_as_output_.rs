@@ -3,7 +3,6 @@ use core::{
     convert::Infallible,
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    pin::Pin,
     ptr
 };
 
@@ -87,7 +86,7 @@ where
 async fn buff_segm_output_async<'f, S, T, C>(
     segm_mut: &'f mut S,
     source: &'f [MaybeUninit<T>],
-    _: Pin<&'f mut C>,
+    _: &'f mut C,
 ) -> SomeOf<usize, Infallible>
 where
     S: TrBuffSegmMut<T>,
@@ -100,7 +99,7 @@ where
 async fn buff_segm_output_cloned_async<'f, S, T, C>(
     segm_mut: &'f mut S,
     source: &'f [T],
-    _: Pin<&'f mut C>,
+    _: &'f mut C,
 ) -> SomeOf<usize, Infallible>
 where
     S: TrBuffSegmMut<T>,

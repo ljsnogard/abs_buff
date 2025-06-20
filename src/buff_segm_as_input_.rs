@@ -3,7 +3,6 @@ use core::{
     convert::Infallible,
     marker::PhantomData,
     mem::MaybeUninit,
-    pin::Pin,
     ptr
 };
 
@@ -76,7 +75,7 @@ where
 pub(crate) async fn buff_segm_ref_input_async<'f, S, T, C>(
     segm_ref: &'f mut S,
     target: &'f mut [MaybeUninit<T>],
-    _: Pin<&'f mut C>,
+    _: &'f mut C,
 ) -> SomeOf<usize, Infallible>
 where
     S: TrBuffSegmRef<T>,

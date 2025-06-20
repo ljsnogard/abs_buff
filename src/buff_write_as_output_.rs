@@ -2,10 +2,12 @@ use core::{
     borrow::BorrowMut,
     marker::PhantomData,
     mem::MaybeUninit,
-    pin::Pin,
 };
 
-use abs_sync::cancellation::{TrCancellationToken, TrMayCancel};
+use abs_sync::{
+    cancellation::TrCancellationToken,
+    may_cancel::TrMayCancel,
+};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
@@ -100,7 +102,7 @@ where
 async fn buff_write_output_async<'f, W, T, C>(
     writer: &'f mut W,
     source: &'f [MaybeUninit<T>],
-    cancel: Pin<&'f mut C>,
+    cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
 where 
     W: TrBuffWrite<T>,
@@ -117,7 +119,7 @@ where
 async fn buff_write_output_cloned_async<'f, W, T, C>(
     writer: &'f mut W,
     source: &'f [T],
-    cancel: Pin<&'f mut C>,
+    cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
 where 
     W: TrBuffWrite<T>,

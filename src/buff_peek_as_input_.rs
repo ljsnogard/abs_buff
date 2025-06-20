@@ -2,10 +2,12 @@ use core::{
     borrow::BorrowMut,
     marker::PhantomData,
     mem::MaybeUninit,
-    pin::Pin,
 };
 
-use abs_sync::cancellation::{TrCancellationToken, TrMayCancel};
+use abs_sync::{
+    cancellation::TrCancellationToken,
+    may_cancel::TrMayCancel,
+};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
@@ -82,7 +84,7 @@ where
 async fn buff_peek_input_async<'f, B, P, T, C>(
     input: &'f mut BuffPeekAsInput<B, P, T>,
     target: &'f mut [MaybeUninit<T>],
-    cancel: Pin<&'f mut C>,
+    cancel: &'f mut C,
 ) -> SomeOf<usize, <P as TrBuffPeek<T>>::Err>
 where
     B: BorrowMut<P>,
