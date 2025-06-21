@@ -11,11 +11,6 @@ pub trait TrBuffRead<T = u8> {
     where
         Self: 'a;
 
-    type ReadAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::ReaderSegm<'a>, Self::Err>>
-    where
-        Self: 'a;
-
     type Err: Error;
 
     /// Lend some segments for reading in async manner. The amount of items
@@ -23,7 +18,8 @@ pub trait TrBuffRead<T = u8> {
     fn read_async<'a>(
         &'a mut self,
         demand: Demand<usize>,
-    ) -> Self::ReadAsync<'a>;
+    ) -> impl TrMayCancel<'a,
+        MayCancelOutput = SomeOf<Self::ReaderSegm<'a>, Self::Err>>;
 
     fn as_input(&mut self) -> impl TrInput<T>
     where

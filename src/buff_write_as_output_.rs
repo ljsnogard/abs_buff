@@ -73,16 +73,11 @@ where
 {
     type Err = <W as TrBuffWrite<T>>::Err;
 
-    type WriteAsync<'a> = BuffWriteOutputAsync<'a, W, T>
-    where
-        T: 'a,
-        Self: 'a;
-
     #[inline]
     fn write_async<'a>(
         &'a mut self,
         source: &'a [MaybeUninit<T>],
-    ) -> Self::WriteAsync<'a> {
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
         BuffWriteAsOutput::write_async(self, source)
     }
 

@@ -7,6 +7,7 @@
 #![feature(unboxed_closures)]
 
 #![feature(let_chains)]
+#![feature(try_trait_v2)]
 
 #![no_std]
 

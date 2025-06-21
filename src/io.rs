@@ -12,12 +12,6 @@ use anylr::SomeOf;
 pub trait TrInput<T = u8> {
     type Err : Error;
 
-    type ReadAsync<'a>:
-        TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
-    where
-        T: 'a,
-        Self: 'a;
-
     /// Move the data out of the device and into the specified target buffer.
     ///
     /// ## Safety
@@ -34,24 +28,18 @@ pub trait TrInput<T = u8> {
     fn read_async<'a>(
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
-    ) -> Self::ReadAsync<'a>;
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>;
 }
 
 /// Unbuffered output device
 pub trait TrOutput<T = u8> {
     type Err : Error;
 
-    type WriteAsync<'a>:
-        TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
-    where
-        T: 'a,
-        Self: 'a;
-
     /// Move data from the specified source into this output device
     fn write_async<'a>(
         &'a mut self,
         source: &'a [MaybeUninit<T>],
-    ) -> Self::WriteAsync<'a>;
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>;
 
     /// Clone data from the specified source buffer into this output device 
     fn write_cloned_async<'a>(

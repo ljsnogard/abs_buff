@@ -56,15 +56,10 @@ where
 {
     type Err = <R as TrBuffRead<T>>::Err;
 
-    type ReadAsync<'a> = BuffReadInputAsync<'a, R, T>
-    where
-        T: 'a,
-        Self: 'a;
-
     fn read_async<'a>(
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
-    ) -> Self::ReadAsync<'a> {
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
         BuffReadInputAsync(self.0.borrow_mut(), target)
     }
 }

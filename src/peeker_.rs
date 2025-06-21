@@ -12,16 +12,15 @@ pub trait TrBuffPeek<T = u8> {
     where
         Self: 'a;
 
-    type PeekAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::PeekerSegm<'a>, Self::Err>>
-    where
-        Self: 'a;
-
     type Err: Error;
 
     /// Lend some slices for peeking. The number and the length of the slices 
     /// to peek are decided by the buffer.
-    fn peek_async(&mut self) -> Self::PeekAsync<'_>;
+    fn peek_async<'f>(
+        &'f mut self,
+    ) -> impl TrMayCancel<'f,
+        MayCancelOutput = SomeOf<Self::PeekerSegm<'f>, Self::Err>
+    >;
 
     fn as_intput(&mut self) -> impl TrInput<T>;
 }

@@ -1,13 +1,9 @@
 use core::{
-    borrow::BorrowMut,
-    convert::Infallible,
-    marker::PhantomData,
-    mem::{self, MaybeUninit},
-    ptr
+    borrow::BorrowMut, convert::Infallible, marker::PhantomData, mem::{self, MaybeUninit}, ops::{ControlFlow, Try}, ptr
 };
 
-use abs_iter::TrMutSliceLike;
-use abs_sync::cancellation::TrCancellationToken;
+use abs_iter::TrAsSliceMut;
+use abs_sync::{cancellation::TrCancellationToken, may_cancel::TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
@@ -71,13 +67,12 @@ where
     S: TrBuffSegmMut<T>,
 {
     type Err = Infallible;
-    type WriteAsync<'a> = BuffSegmMutOutputAsync<'a, S, T> where Self: 'a;
 
     #[inline]
     fn write_async<'a>(
         &'a mut self,
         source: &'a [MaybeUninit<T>],
-    ) -> Self::WriteAsync<'a> {
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
         BuffSegmMutAsOutput::write_async(self, source)
     }
 }
@@ -117,7 +112,8 @@ where
     S: TrBuffSegmMut<T>,
 {
     let length = Demand::at_most(source.len());
-    let Option::Some(mut parts) = segment.take_segm_mut(length) else {
+    let branch = segment.take_segm_mut(length).branch();
+    let ControlFlow::Continue(mut parts) = branch else {
         return 0
     };
     let mut copied = 0usize;
@@ -145,7 +141,8 @@ where
     T: Clone,
 {
     let length = Demand::at_most(source.len());
-    let Option::Some(mut parts) = segment.take_segm_mut(length) else {
+    let branch = segment.take_segm_mut(length).branch();
+    let ControlFlow::Continue(mut parts) = branch else {
         return 0
     };
     let mut copied = 0usize;

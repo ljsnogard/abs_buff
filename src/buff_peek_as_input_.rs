@@ -2,6 +2,7 @@ use core::{
     borrow::BorrowMut,
     marker::PhantomData,
     mem::MaybeUninit,
+    ops::{ControlFlow, Try},
 };
 
 use abs_sync::{
@@ -67,15 +68,10 @@ where
 {
     type Err = <P as TrBuffPeek<T>>::Err;
 
-    type ReadAsync<'a> = BuffPeekInputAsync<'a, B, P, T>
-    where
-        T: 'a,
-        Self: 'a;
-
     fn read_async<'a>(
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
-    ) -> Self::ReadAsync<'a> {
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
         BuffPeekInputAsync(self, target)
     }
 }
@@ -100,10 +96,13 @@ where
     let mut copied = 0usize;
     if let Option::Some(mut segment) = opt_segm {
         let length = Demand::at_most(input.offset_);
-        let Option::Some(prev_done) = segment.take_segm_ref(length) else {
-            return SomeOf::new_left(copied)
-        };
-        drop(prev_done);
+        if true {
+            let branch = segment.take_segm_ref(length).branch();
+            let ControlFlow::Continue(prev_done) = branch else {
+                return SomeOf::new_left(copied)
+            };
+            drop(prev_done);
+        }
         copied = buff_segm_ref_read(&mut segment, target);
     };
     input.offset_ += copied;

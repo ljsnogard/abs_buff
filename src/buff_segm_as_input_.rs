@@ -3,11 +3,12 @@ use core::{
     convert::Infallible,
     marker::PhantomData,
     mem::MaybeUninit,
+    ops::{ControlFlow, Try},
     ptr
 };
 
-use abs_iter::TrSliceLike;
-use abs_sync::cancellation::TrCancellationToken;
+use abs_iter::TrAsSlice;
+use abs_sync::{cancellation::TrCancellationToken, may_cancel::TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
@@ -59,14 +60,13 @@ where
     B: BorrowMut<S>,
     S: TrBuffSegmRef<T>,
 {
-    type ReadAsync<'a> = BuffSegmRefInputAsync<'a, S, T> where Self: 'a;
     type Err = Infallible;
 
     #[inline]
     fn read_async<'a>(
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
-    ) -> Self::ReadAsync<'a> {
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
         BuffSegmRefAsInput::read_async(self, target)
     }
 }
@@ -93,7 +93,8 @@ where
     T: Sized,
 {
     let length = Demand::at_most(target.len());
-    let Option::Some(mut parts) = segment.take_segm_ref(length) else {
+    let branch = segment.take_segm_ref(length).branch();
+    let ControlFlow::Continue(mut parts) = branch else {
         return 0;
     };
     let mut copied = 0usize;

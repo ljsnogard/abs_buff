@@ -11,11 +11,6 @@ pub trait TrBuffWrite<T = u8> {
     where
         Self: 'a;
 
-    type WriteAsync<'a>: TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::WriterSegm<'a>, Self::Err>>
-    where
-        Self: 'a;
-
     type Err: Error;
 
     /// Lend some segments for writing in an async manner. The total amount of
@@ -23,7 +18,8 @@ pub trait TrBuffWrite<T = u8> {
     fn write_async<'a>(
         &'a mut self,
         demand: Demand<usize>,
-    ) -> Self::WriteAsync<'a>;
+    ) -> impl TrMayCancel<'a,
+        MayCancelOutput = SomeOf<Self::WriterSegm<'a>, Self::Err>>;
 
     fn as_output(&mut self) -> impl TrOutput<T>
     where

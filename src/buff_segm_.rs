@@ -1,6 +1,9 @@
-﻿use core::mem::MaybeUninit;
+﻿use core::{
+    mem::MaybeUninit,
+    ops::Try,
+};
 
-use abs_iter::{TrMutSliceLike, TrSliceLike};
+use abs_iter::{TrAsSlice, TrAsSliceMut};
 use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, Demand, TrInput, TrOutput};
 
 pub trait TrBuffSegmView {
@@ -26,31 +29,19 @@ pub trait TrBuffSegmRef<T>
 where
     Self: TrBuffSegmView<Item = T>,
 {
-    /// The segment type of the buffer that will be returned by the function
-    /// `iter_slices` and can be treat as a slice.
-    type Slice<'a>: TrSliceLike<Elem = T>
-    where
-        T: 'a,
-        Self: 'a;
-
-    /// The segment type of the buffer that will be returned by the function
-    /// `take_segm_ref` and also organized with one or more slices.
-    type Segm<'a>: TrBuffSegmRef<T>
-    where
-        T: 'a,
-        Self: 'a;
-
     /// Take a slice starting from the beginning out of this segment, length
     /// specified by the demand argument, reducing the length of this segment
     /// when the taken slice drops.
-    fn take_segm_ref<'a>(
-        &'a mut self,
+    fn take_segm_ref(
+        &mut self,
         length: Demand<usize>,
-    ) -> Option<Self::Segm<'a>>;
+    ) -> impl Try<Output: TrBuffSegmRef<T>>;
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// slices.
-    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
+    fn iter_slices<'a>(
+        &'a mut self,
+    ) -> impl IntoIterator<Item: TrAsSlice<Elem = T>>
     where
         T: 'a;
 
@@ -69,31 +60,19 @@ pub trait TrBuffSegmMut<T>
 where
     Self: TrBuffSegmView<Item = MaybeUninit<T>>,
 {
-    /// The segment type of the buffer that will be returned by the function
-    /// `iter_slices` and can be treat as a slice mut.
-    type Slice<'a>: TrMutSliceLike<Elem = MaybeUninit<T>>
-    where
-        T: 'a,
-        Self: 'a;
-
-    /// The segment type of the buffer that will be returned by the function
-    /// `take_segm_mut` and also organized with one or more slices mut.
-    type Segm<'a>: TrBuffSegmMut<T>
-    where
-        T: 'a,
-        Self: 'a;
-
     /// Take a slice starting from the beginning out of this segment, length
     /// specified by the demand argument, reducing the length of this segment
     /// when the taken slice drops.
-    fn take_segm_mut<'a>(
-        &'a mut self, 
+    fn take_segm_mut(
+        &mut self, 
         length: Demand<usize>,
-    ) -> Option<Self::Segm<'a>>;
+    ) -> impl Try<Output: TrBuffSegmMut<T>>;
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// mut slices.
-    fn iter_slices<'a>(&'a mut self) -> impl IntoIterator<Item = Self::Slice<'a>>
+    fn iter_slices<'a>(
+        &'a mut self,
+    ) -> impl IntoIterator<Item: TrAsSliceMut<Elem = MaybeUninit<T>>>
     where
         T: 'a;
 
