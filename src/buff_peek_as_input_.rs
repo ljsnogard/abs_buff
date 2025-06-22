@@ -92,6 +92,7 @@ where
         .peek_async()
         .may_cancel_with(cancel)
         .await
+        .into_any_of()
         .split();
     let mut copied = 0usize;
     if let Option::Some(mut segment) = opt_segm {
