@@ -7,10 +7,6 @@ use crate::{BuffWriteAsOutput, Demand, TrBuffSegmMut, TrOutput};
 
 /// Buffer that will emit zero or more segments for producer (and update cursor)
 pub trait TrBuffWrite<T = u8> {
-    type WriterSegm<'a>: 'a + TrBuffSegmMut<T>
-    where
-        Self: 'a;
-
     type Err: Error;
 
     /// Lend some segments for writing in an async manner. The total amount of
@@ -19,7 +15,7 @@ pub trait TrBuffWrite<T = u8> {
         &'a mut self,
         demand: Demand<usize>,
     ) -> impl TrMayCancel<'a,
-        MayCancelOutput = SomeOf<Self::WriterSegm<'a>, Self::Err>>;
+        MayCancelOutput = SomeOf<impl TrBuffSegmMut<T>, Self::Err>>;
 
     fn as_output(&mut self) -> impl TrOutput<T>
     where
@@ -33,5 +29,5 @@ pub trait TrBuffTryWrite<T = u8>: TrBuffWrite<T> {
     fn try_write<'a>(
         &'a mut self,
         demand: Demand<usize>,
-    ) -> SomeOf<Self::WriterSegm<'a>, Self::Err>;
+    ) -> SomeOf<impl TrBuffSegmMut<T>, Self::Err>;
 }
