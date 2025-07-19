@@ -117,7 +117,7 @@ where
         return 0
     };
     let mut copied = 0usize;
-    for mut dst in parts.iter_slices() {
+    for mut dst in parts.iter_slices_mut() {
         let dst = dst.as_slice_mut();
         let copy_len = dst.len();
         let src = &source[copied..copy_len];
@@ -151,7 +151,7 @@ where
     // copying into the segment. This promises the correct behaviours when
     // cloning items like `Rc` or `Arc`
     if mem::needs_drop::<T>() {
-        for mut dst in parts.iter_slices() {
+        for mut dst in parts.iter_slices_mut() {
             let dst = dst.as_slice_mut();
             let src = &source[copied..];
             for i in 0..dst.len() {
@@ -161,7 +161,7 @@ where
             copied += dst.len()
         }
     } else {
-        for mut dst in parts.iter_slices() {
+        for mut dst in parts.iter_slices_mut() {
             let dst = unsafe {
                 let p = dst.as_slice_mut() as *mut _ as *mut [T];
                 &mut *p

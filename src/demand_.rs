@@ -104,16 +104,19 @@ where
         }
     }
 
-    /// Create a narrawed range from the least side if x is within the range
-    /// 
+    /// Create a narrowed range from the least side if x is within the range
+    ///
     /// ## Example
     /// ```
     /// use abs_buff::Demand;
-    /// 
+    ///
     /// let a = Demand::between(5, 10);
+    /// assert!(a.least().is_some_and(|l| *l == 5));
     /// let narrowed = a.narrow_from_least(8).unwrap();
     /// assert!(narrowed.least().is_some_and(|l| *l == 8));
+    ///
     /// let b = Demand::at_most(10);
+    /// assert!(b.least().is_none());
     /// let narrowed = b.narrow_from_least(7).unwrap();
     /// assert!(narrowed.least().is_some_and(|l| *l == 7));
     /// ```
@@ -132,15 +135,18 @@ where
     }
 
     /// Create a narrowed range from the max side if x is within the range
-    /// 
+    ///
     /// ## Example
     /// ```
     /// use abs_buff::Demand;
     /// 
     /// let a = Demand::between(5, 10);
+    /// assert!(a.most().is_some_and(|m| *m == 10));
     /// let narrowed = a.narrow_from_most(8).unwrap();
     /// assert!(narrowed.most().is_some_and(|m| *m == 8));
+    ///
     /// let b = Demand::at_least(5);
+    /// assert!(b.most().is_none());
     /// let narrowed = b.narrow_from_most(7).unwrap();
     /// assert!(narrowed.most().is_some_and(|m| *m == 7));
     /// ```

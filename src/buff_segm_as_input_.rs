@@ -13,7 +13,7 @@ use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
-    buff_segm_::TrBuffSegmRef,
+    buff_segm_::{TrBuffSegmRef, TrBuffSegmView},
     io::TrInput, Demand,
 };
 
@@ -94,7 +94,7 @@ where
 {
     let length = Demand::at_most(target.len());
     let branch = segment.take_segm_ref(length).branch();
-    let ControlFlow::Continue(mut parts) = branch else {
+    let ControlFlow::Continue(parts) = branch else {
         return 0;
     };
     let mut copied = 0usize;

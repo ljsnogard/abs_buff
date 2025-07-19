@@ -12,16 +12,14 @@ pub trait TrBuffSegmView {
     /// Returns true if no available items to consume, false otherwise.
     fn is_empty(&self) -> bool;
 
-    /// The items count of the unconsumed part of the segment.
-    fn len(&self) -> usize;
-
     /// Returns the capacity of the segment, no matter the elements are
     /// consumed or not.
     fn capacity(&self) -> usize;
 
-    /// Iterate over the elements of the internal buffer retained by the segment
-    /// and retrieve as pointers.
-    fn iter_ptr(&self) -> impl Iterator<Item = *const Self::Item>;
+    /// Iterate the unconsumed parts of the segment slice by slice.
+    fn iter_slices(
+        &self,
+    ) -> impl IntoIterator<Item: TrAsSlice<Elem = Self::Item>>;
 }
 
 /// A buffer that its data is organized with one or more slices
@@ -36,14 +34,6 @@ where
         &mut self,
         length: Demand<usize>,
     ) -> impl Try<Output: TrBuffSegmRef<T>>;
-
-    /// Iterate the unconsumed parts of the segment one by one in the form of
-    /// slices.
-    fn iter_slices<'a>(
-        &'a mut self,
-    ) -> impl IntoIterator<Item: TrAsSlice<Elem = T>>
-    where
-        T: 'a;
 
     /// Turn the borrow of this segment into an input so that its internal data
     /// can be read by copying or moving.
@@ -70,7 +60,7 @@ where
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// mut slices.
-    fn iter_slices<'a>(
+    fn iter_slices_mut<'a>(
         &'a mut self,
     ) -> impl IntoIterator<Item: TrAsSliceMut<Elem = MaybeUninit<T>>>
     where
