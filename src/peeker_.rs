@@ -12,10 +12,10 @@ pub trait TrBuffPeek<T = u8> {
 
     /// Lend some slices for peeking. The number and the length of the slices 
     /// to peek are decided by the buffer.
-    fn peek_async<'f>(
-        &'f mut self,
-    ) -> impl TrMayCancel<'f,
-        MayCancelOutput = SomeOf<impl 'f + TrBuffSegmRef<T>, Self::Err>>;
+    fn peek_async<'a>(
+        &'a mut self,
+    ) -> impl TrMayCancel<'a,
+        MayCancelOutput = SomeOf<impl 'a + TrBuffSegmRef<T>, Self::Err>>;
 
     fn as_intput(&mut self) -> impl TrInput<T>
     where
@@ -26,5 +26,7 @@ pub trait TrBuffPeek<T = u8> {
 }
 
 pub trait TrBuffTryPeek<T = u8>: TrBuffPeek<T> {
-    fn try_peek(&mut self) -> SomeOf<impl TrBuffSegmRef<T>, Self::Err>;
+    fn try_peek<'a>(
+        &'a mut self
+    ) -> SomeOf<impl 'a + TrBuffSegmRef<T>, Self::Err>;
 }

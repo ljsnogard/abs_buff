@@ -66,7 +66,7 @@ where
 
 #[gen_may_cancel_future(BuffReadInput)]
 async fn buff_read_input_async<'a, R, T, C>(
-    reader: &'a mut R,
+    buff_r: &'a mut R,
     target: &'a mut [MaybeUninit<T>],
     cancel: &'a mut C,
 ) -> SomeOf<usize, <R as TrBuffRead<T>>::Err>
@@ -74,8 +74,8 @@ where
     R: TrBuffRead<T>,
     C: TrCancellationToken,
 {
-    reader
-        .read_async(Demand::at_most(target.len()))
+    buff_r
+        .read_async(&Demand::with_max(target.len()))
         .may_cancel_with(cancel)
         .await
         .map_left(|mut s| buff_segm_ref_read(&mut s, target))

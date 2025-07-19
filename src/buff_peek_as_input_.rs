@@ -22,7 +22,7 @@ where
     B: BorrowMut<P>,
     P: TrBuffPeek<T>,
 {
-    peeker_: B,
+    buff_p_: B,
     offset_: usize,
     _use_p_: PhantomData<P>,
     _use_t_: PhantomData<[T]>,
@@ -33,9 +33,9 @@ where
     B: BorrowMut<P>,
     P: TrBuffPeek<T>,
 {
-    pub const fn new(peeker: B, offset: usize) -> Self {
+    pub const fn new(buff_p: B, offset: usize) -> Self {
         BuffPeekAsInput {
-            peeker_: peeker,
+            buff_p_: buff_p,
             offset_: offset,
             _use_p_: PhantomData,
             _use_t_: PhantomData,
@@ -87,8 +87,8 @@ where
     P: TrBuffPeek<T>,
     C: TrCancellationToken,
 {
-    let peeker: &mut P = input.peeker_.borrow_mut();
-    let (opt_segm, opt_err) = peeker
+    let buff_p: &mut P = input.buff_p_.borrow_mut();
+    let (opt_segm, opt_err) = buff_p
         .peek_async()
         .may_cancel_with(cancel)
         .await
@@ -96,9 +96,9 @@ where
         .split();
     let mut copied = 0usize;
     if let Option::Some(mut segment) = opt_segm {
-        let length = Demand::at_most(input.offset_);
+        let length = Demand::with_max(input.offset_);
         if true {
-            let branch = segment.take_segm_ref(length).branch();
+            let branch = segment.take_segm_ref(&length).branch();
             let ControlFlow::Continue(prev_done) = branch else {
                 return SomeOf::new_left(copied)
             };

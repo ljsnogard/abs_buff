@@ -7,7 +7,6 @@ use core::{
     ptr
 };
 
-use abs_iter::TrAsSlice;
 use abs_sync::{cancellation::TrCancellationToken, may_cancel::TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
@@ -92,14 +91,14 @@ where
     S: TrBuffSegmRef<T>,
     T: Sized,
 {
-    let length = Demand::at_most(target.len());
-    let branch = segment.take_segm_ref(length).branch();
+    let length = Demand::with_max(target.len());
+    let branch = segment.take_segm_ref(&length).branch();
     let ControlFlow::Continue(parts) = branch else {
         return 0;
     };
     let mut copied = 0usize;
     for src in parts.iter_slices() {
-        let src = src.as_slice();
+        let src = src.as_ref();
         let copy_len = src.len();
         let dst = &mut target[copied..copy_len];
         let src_head = (&src[0]) as *const T;

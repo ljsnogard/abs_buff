@@ -17,8 +17,8 @@ where
     /// use abs_buff::Demand;
     /// 
     /// let a = Demand::exactly(1);
-    /// assert!(matches!(a.least(), Option::Some(1)));
-    /// assert!(matches!(a.most(), Option::Some(1)));
+    /// assert!(matches!(a.min(), Option::Some(1)));
+    /// assert!(matches!(a.max(), Option::Some(1)));
     /// ```
     pub const fn exactly(val: T) -> Self {
         Demand(Bound::Exact(val))
@@ -32,11 +32,11 @@ where
     /// use abs_buff::Demand;
     /// 
     /// let a = Demand::between(10, 1);
-    /// assert!(matches!(a.least(), Option::Some(1)));
-    /// assert!(matches!(a.most(), Option::Some(10)));
+    /// assert!(matches!(a.min(), Option::Some(1)));
+    /// assert!(matches!(a.max(), Option::Some(10)));
     /// let b = Demand::between(1, 10);
-    /// assert!(matches!(b.least(), Option::Some(1)));
-    /// assert!(matches!(b.most(), Option::Some(10)));
+    /// assert!(matches!(b.min(), Option::Some(1)));
+    /// assert!(matches!(b.max(), Option::Some(10)));
     /// ```
     pub fn between(a: T, b: T) -> Self {
         Demand(if a < b {
@@ -54,12 +54,12 @@ where
     /// ```
     /// use abs_buff::Demand;
     /// 
-    /// let a = Demand::at_least(2);
-    /// assert!(matches!(a.least(), Option::Some(2)));
-    /// assert!(a.most().is_none());
+    /// let a = Demand::with_min(2);
+    /// assert!(matches!(a.min(), Option::Some(2)));
+    /// assert!(a.max().is_none());
     /// ```
-    pub const fn at_least(val: T) -> Self {
-        Demand(Bound::Lower(val))
+    pub const fn with_min(val: T) -> Self {
+        Demand(Bound::Min(val))
     }
 
     /// Create a range with specified max value
@@ -68,27 +68,27 @@ where
     /// ```
     /// use abs_buff::Demand;
     /// 
-    /// let a = Demand::at_most(2);
-    /// assert!(matches!(a.most(), Option::Some(2)));
-    /// assert!(a.least().is_none());
+    /// let a = Demand::with_max(2);
+    /// assert!(matches!(a.max(), Option::Some(2)));
+    /// assert!(a.min().is_none());
     /// ```
-    pub const fn at_most(val: T) -> Self {
-        Demand(Bound::Upper(val))
+    pub const fn with_max(val: T) -> Self {
+        Demand(Bound::Max(val))
     }
 
     /// Check if a low bound is included in the demand
-    pub const fn least(&self) -> Option<&T> {
+    pub const fn min(&self) -> Option<&T> {
         match &self.0 {
-            Bound::Lower(l) => Option::Some(l),
+            Bound::Min(l) => Option::Some(l),
             Bound::Exact(x) => Option::Some(x),
             Bound::Range(l, _)  => Option::Some(l),
             _ => Option::None,
         }
     }
 
-    pub const fn most(&self) -> Option<&T> {
+    pub const fn max(&self) -> Option<&T> {
         match &self.0 {
-            Bound::Upper(u) => Option::Some(u),
+            Bound::Max(u) => Option::Some(u),
             Bound::Exact(x) => Option::Some(x),
             Bound::Range(_, u ) => Option::Some(u),
             _ => Option::None,
@@ -97,8 +97,8 @@ where
 
     pub const fn as_ref(&self) -> Demand<&T> {
         match &self.0 {
-            Bound::Lower(l) => Demand(Bound::Lower(l)),
-            Bound::Upper(u) => Demand(Bound::Upper(u)),
+            Bound::Min(l) => Demand(Bound::Min(l)),
+            Bound::Max(u) => Demand(Bound::Max(u)),
             Bound::Range(l, u) => Demand(Bound::Range(l, u)),
             Bound::Exact(v) => Demand(Bound::Exact(v)),
         }
@@ -111,24 +111,27 @@ where
     /// use abs_buff::Demand;
     ///
     /// let a = Demand::between(5, 10);
-    /// assert!(a.least().is_some_and(|l| *l == 5));
-    /// let narrowed = a.narrow_from_least(8).unwrap();
-    /// assert!(narrowed.least().is_some_and(|l| *l == 8));
+    /// assert!(a.min().is_some_and(|l| *l == 5));
+    /// let narrowed = a.narrow_from_min(8).unwrap();
+    /// assert!(narrowed.min().is_some_and(|l| *l == 8));
     ///
-    /// let b = Demand::at_most(10);
-    /// assert!(b.least().is_none());
-    /// let narrowed = b.narrow_from_least(7).unwrap();
-    /// assert!(narrowed.least().is_some_and(|l| *l == 7));
+    /// let b = Demand::with_max(10);
+    /// assert!(b.min().is_none());
+    /// let narrowed = b.narrow_from_min(7).unwrap();
+    /// assert!(narrowed.min().is_some_and(|l| *l == 7));
     /// ```
-    pub fn narrow_from_least(self, x: T) -> Option<Self> {
-        match self.0 {
-            Bound::Lower(l) if l <= x
-                => Option::Some(Demand::at_least(x)),
-            Bound::Upper(u) if x <= u
-                => Option::Some(Demand::between(x, u)),
-            Bound::Range(l, u) if l <= x && x <= u
-                => Option::Some(Demand::between(cmp::max(l, x), u)),
-            Bound::Exact(v) if x == v
+    pub fn narrow_from_min(&self, x: T) -> Option<Self>
+    where
+        T: Clone,
+    {
+        match &self.0 {
+            Bound::Min(l) if l <= &x
+                => Option::Some(Demand::with_min(x)),
+            Bound::Max(u) if &x <= u
+                => Option::Some(Demand::between(x, u.clone())),
+            Bound::Range(l, u) if l <= &x && &x <= u
+                => Option::Some(Demand::between(cmp::max(l.clone(), x), u.clone())),
+            Bound::Exact(v) if &x == v
                 => Option::Some(Demand::exactly(x)),
             _ => Option::None,
         }
@@ -141,24 +144,27 @@ where
     /// use abs_buff::Demand;
     /// 
     /// let a = Demand::between(5, 10);
-    /// assert!(a.most().is_some_and(|m| *m == 10));
-    /// let narrowed = a.narrow_from_most(8).unwrap();
-    /// assert!(narrowed.most().is_some_and(|m| *m == 8));
+    /// assert!(a.max().is_some_and(|m| *m == 10));
+    /// let narrowed = a.narrow_from_max(8).unwrap();
+    /// assert!(narrowed.max().is_some_and(|m| *m == 8));
     ///
-    /// let b = Demand::at_least(5);
-    /// assert!(b.most().is_none());
-    /// let narrowed = b.narrow_from_most(7).unwrap();
-    /// assert!(narrowed.most().is_some_and(|m| *m == 7));
+    /// let b = Demand::with_min(5);
+    /// assert!(b.max().is_none());
+    /// let narrowed = b.narrow_from_max(7).unwrap();
+    /// assert!(narrowed.max().is_some_and(|m| *m == 7));
     /// ```
-    pub fn narrow_from_most(self, x: T) -> Option<Self> {
-        match self.0 {
-            Bound::Lower(l) if l <= x
-                => Option::Some(Demand::between(l, x)),
-            Bound::Upper(u) if x <= u
-                => Option::Some(Demand::at_most(x)),
-            Bound::Range(l, u) if l <= x && x <= u
-                => Option::Some(Demand::between(l, cmp::min(x, u))),
-            Bound::Exact(v) if x == v
+    pub fn narrow_from_max(&self, x: T) -> Option<Self>
+    where
+        T: Clone,
+    {
+        match &self.0 {
+            Bound::Min(l) if l <= &x
+                => Option::Some(Demand::between(l.clone(), x)),
+            Bound::Max(u) if &x <= u
+                => Option::Some(Demand::with_max(x)),
+            Bound::Range(l, u) if l <= &x && &x <= u
+                => Option::Some(Demand::between(l.clone(), cmp::min(x, u.clone()))),
+            Bound::Exact(v) if &x == v
                 => Option::Some(Demand::exactly(x)),
             _ => Option::None,
         }
@@ -170,8 +176,8 @@ enum Bound<T>
 where
     T: Eq + Ord,
 {
-    Lower(T),
-    Upper(T),
+    Min(T),
+    Max(T),
     Exact(T),
     Range(T, T),
 }

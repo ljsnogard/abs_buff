@@ -13,7 +13,7 @@ pub trait TrBuffRead<T = u8> {
     /// is specified by the parameter `demand`.
     fn read_async<'a>(
         &'a mut self,
-        demand: Demand<usize>,
+        demand: &Demand<usize>,
     ) -> impl TrMayCancel<'a,
         MayCancelOutput = SomeOf<impl TrBuffSegmRef<T>, Self::Err>>;
 
@@ -26,8 +26,8 @@ pub trait TrBuffRead<T = u8> {
 }
 
 pub trait TrBuffTryRead<T = u8>: TrBuffRead<T> {
-    fn try_read(
-        &mut self,
-        demand: Demand<usize>,
-    ) -> SomeOf<impl TrBuffSegmRef<T>, Self::Err>;
+    fn try_read<'a>(
+        &'a mut self,
+        demand: &Demand<usize>,
+    ) -> SomeOf<impl 'a + TrBuffSegmRef<T>, Self::Err>;
 }

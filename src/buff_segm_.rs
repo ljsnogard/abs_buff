@@ -3,7 +3,6 @@
     ops::Try,
 };
 
-use abs_iter::{TrAsSlice, TrAsSliceMut};
 use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, Demand, TrInput, TrOutput};
 
 pub trait TrBuffSegmView {
@@ -19,7 +18,7 @@ pub trait TrBuffSegmView {
     /// Iterate the unconsumed parts of the segment slice by slice.
     fn iter_slices(
         &self,
-    ) -> impl IntoIterator<Item: TrAsSlice<Elem = Self::Item>>;
+    ) -> impl IntoIterator<Item: AsRef<[Self::Item]>>;
 }
 
 /// A buffer that its data is organized with one or more slices
@@ -32,7 +31,7 @@ where
     /// when the taken slice drops.
     fn take_segm_ref(
         &mut self,
-        length: Demand<usize>,
+        length: &Demand<usize>,
     ) -> impl Try<Output: TrBuffSegmRef<T>>;
 
     /// Turn the borrow of this segment into an input so that its internal data
@@ -55,14 +54,14 @@ where
     /// when the taken slice drops.
     fn take_segm_mut(
         &mut self, 
-        length: Demand<usize>,
+        length: &Demand<usize>,
     ) -> impl Try<Output: TrBuffSegmMut<T>>;
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// mut slices.
     fn iter_slices_mut<'a>(
         &'a mut self,
-    ) -> impl IntoIterator<Item: TrAsSliceMut<Elem = MaybeUninit<T>>>
+    ) -> impl IntoIterator<Item: AsMut<[MaybeUninit<T>]>>
     where
         T: 'a;
 

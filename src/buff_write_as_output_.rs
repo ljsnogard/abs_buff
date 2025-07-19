@@ -95,7 +95,7 @@ where
 
 #[gen_may_cancel_future(BuffWriteOutput)]
 async fn buff_write_output_async<'f, W, T, C>(
-    writer: &'f mut W,
+    buff_w: &'f mut W,
     source: &'f [MaybeUninit<T>],
     cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
@@ -103,8 +103,8 @@ where
     W: TrBuffWrite<T>,
     C: TrCancellationToken,
 {
-    writer
-        .write_async(Demand::at_most(source.len()))
+    buff_w
+        .write_async(&Demand::with_max(source.len()))
         .may_cancel_with(cancel)
         .await
         .map_left(|mut s| buff_segm_mut_write(&mut s, source))
@@ -112,7 +112,7 @@ where
 
 #[gen_may_cancel_future(BuffWriteOutputCloned)]
 async fn buff_write_output_cloned_async<'f, W, T, C>(
-    writer: &'f mut W,
+    buff_w: &'f mut W,
     source: &'f [T],
     cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
@@ -121,8 +121,8 @@ where
     T: Clone,
     C: TrCancellationToken,
 {
-    writer
-        .write_async(Demand::at_most(source.len()))
+    buff_w
+        .write_async(&Demand::with_max(source.len()))
         .may_cancel_with(cancel)
         .await
         .map_left(|mut s| buff_segm_mut_write_cloned(&mut s, source))

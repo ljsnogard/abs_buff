@@ -1,8 +1,12 @@
 use core::{
-    borrow::BorrowMut, convert::Infallible, marker::PhantomData, mem::{self, MaybeUninit}, ops::{ControlFlow, Try}, ptr
+    borrow::BorrowMut,
+    convert::Infallible,
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    ops::{ControlFlow, Try},
+    ptr,
 };
 
-use abs_iter::TrAsSliceMut;
 use abs_sync::{cancellation::TrCancellationToken, may_cancel::TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
@@ -111,14 +115,14 @@ pub(crate) fn buff_segm_mut_write<'f, S, T>(
 where
     S: TrBuffSegmMut<T>,
 {
-    let length = Demand::at_most(source.len());
-    let branch = segment.take_segm_mut(length).branch();
+    let length = Demand::with_max(source.len());
+    let branch = segment.take_segm_mut(&length).branch();
     let ControlFlow::Continue(mut parts) = branch else {
         return 0
     };
     let mut copied = 0usize;
     for mut dst in parts.iter_slices_mut() {
-        let dst = dst.as_slice_mut();
+        let dst = dst.as_mut();
         let copy_len = dst.len();
         let src = &source[copied..copy_len];
         let src_head = (&src[0]) as *const MaybeUninit<T>;
@@ -140,8 +144,8 @@ where
     S: TrBuffSegmMut<T>,
     T: Clone,
 {
-    let length = Demand::at_most(source.len());
-    let branch = segment.take_segm_mut(length).branch();
+    let length = Demand::with_max(source.len());
+    let branch = segment.take_segm_mut(&length).branch();
     let ControlFlow::Continue(mut parts) = branch else {
         return 0
     };
@@ -152,7 +156,7 @@ where
     // cloning items like `Rc` or `Arc`
     if mem::needs_drop::<T>() {
         for mut dst in parts.iter_slices_mut() {
-            let dst = dst.as_slice_mut();
+            let dst = dst.as_mut();
             let src = &source[copied..];
             for i in 0..dst.len() {
                 let m = &mut dst[i];
@@ -163,7 +167,7 @@ where
     } else {
         for mut dst in parts.iter_slices_mut() {
             let dst = unsafe {
-                let p = dst.as_slice_mut() as *mut _ as *mut [T];
+                let p = dst.as_mut() as *mut _ as *mut [T];
                 &mut *p
             };
             let src = &source[copied..copied + dst.len()];

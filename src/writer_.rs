@@ -13,7 +13,7 @@ pub trait TrBuffWrite<T = u8> {
     /// items is specified by the parameter `demand`.
     fn write_async<'a>(
         &'a mut self,
-        demand: Demand<usize>,
+        demand: &Demand<usize>,
     ) -> impl TrMayCancel<'a,
         MayCancelOutput = SomeOf<impl TrBuffSegmMut<T>, Self::Err>>;
 
@@ -28,6 +28,6 @@ pub trait TrBuffWrite<T = u8> {
 pub trait TrBuffTryWrite<T = u8>: TrBuffWrite<T> {
     fn try_write<'a>(
         &'a mut self,
-        demand: Demand<usize>,
-    ) -> SomeOf<impl TrBuffSegmMut<T>, Self::Err>;
+        demand: &Demand<usize>,
+    ) -> SomeOf<impl 'a + TrBuffSegmMut<T>, Self::Err>;
 }
