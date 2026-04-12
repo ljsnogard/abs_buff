@@ -13,7 +13,7 @@ use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_::{TrBuffSegmRef, TrBuffSegmView},
-    io::TrInput, Demand,
+    io::TrInput,
 };
 
 pub struct BuffSegmRefAsInput<B, S, T>
@@ -91,7 +91,7 @@ where
     S: TrBuffSegmRef<T>,
     T: Sized,
 {
-    let length = Demand::with_max(target.len());
+    let length = ..target.len();
     let branch = segment.take_segm_ref(&length).branch();
     let ControlFlow::Continue(parts) = branch else {
         return 0;

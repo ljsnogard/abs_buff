@@ -13,7 +13,7 @@ use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_output_::{buff_segm_mut_write, buff_segm_mut_write_cloned},
-    Demand, TrBuffWrite, TrOutput,
+    TrBuffWrite, TrOutput,
 };
 
 pub struct BuffWriteAsOutput<B, W, T>(B, PhantomData<W>, PhantomData<[T]>)
@@ -99,12 +99,13 @@ async fn buff_write_output_async<'f, W, T, C>(
     source: &'f [MaybeUninit<T>],
     cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
-where 
+where
     W: TrBuffWrite<T>,
     C: TrCancellationToken,
 {
+    let demand = ..source.len();
     buff_w
-        .write_async(&Demand::with_max(source.len()))
+        .write_async(&demand)
         .may_cancel_with(cancel)
         .await
         .map_left(|mut s| buff_segm_mut_write(&mut s, source))
@@ -116,13 +117,14 @@ async fn buff_write_output_cloned_async<'f, W, T, C>(
     source: &'f [T],
     cancel: &'f mut C,
 ) -> SomeOf<usize, <W as TrBuffWrite<T>>::Err>
-where 
+where
     W: TrBuffWrite<T>,
     T: Clone,
     C: TrCancellationToken,
 {
+    let demand = ..source.len();
     buff_w
-        .write_async(&Demand::with_max(source.len()))
+        .write_async(&demand)
         .may_cancel_with(cancel)
         .await
         .map_left(|mut s| buff_segm_mut_write_cloned(&mut s, source))

@@ -1,12 +1,10 @@
 ﻿// To allow Box<dyn Future>
-#![feature(allocator_api)]
+// #![feature(allocator_api)]
 
 // to enable no hand-written poll
 #![feature(async_fn_traits)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(unboxed_closures)]
-
-#![feature(let_chains)]
 #![feature(try_trait_v2)]
 
 #![no_std]
@@ -26,7 +24,6 @@ mod buff_write_as_output_;
 mod buff_segm_;
 mod buff_segm_as_input_;
 mod buff_segm_as_output_;
-mod demand_;
 mod peeker_;
 mod reader_;
 mod writer_;
@@ -48,7 +45,6 @@ pub use buff_segm_as_output_::{
     BuffSegmMutAsOutput, BuffSegmMutOutputAsync, BuffSegmMutOutputFuture,
     BuffSegmMutOutputClonedAsync, BuffSegmMutOutputClonedFuture,
 };
-pub use demand_::Demand;
 pub use io::{TrInput, TrOutput};
 pub use peeker_::{TrBuffPeek, TrBuffTryPeek};
 pub use reader_::{TrBuffRead, TrBuffTryRead};

@@ -1,9 +1,12 @@
-﻿use core::error::Error;
+﻿use core::{
+    error::Error,
+    ops::RangeBounds,
+};
 
 use abs_sync::may_cancel::TrMayCancel;
 use anylr::SomeOf;
 
-use crate::{BuffWriteAsOutput, Demand, TrBuffSegmMut, TrOutput};
+use crate::{BuffWriteAsOutput, TrBuffSegmMut, TrOutput};
 
 /// Buffer that will emit zero or more segments for producer (and update cursor)
 pub trait TrBuffWrite<T = u8> {
@@ -13,9 +16,9 @@ pub trait TrBuffWrite<T = u8> {
     /// items is specified by the parameter `demand`.
     fn write_async<'a>(
         &'a mut self,
-        demand: &Demand<usize>,
+        demand: &impl RangeBounds<usize>,
     ) -> impl TrMayCancel<'a,
-        MayCancelOutput = SomeOf<impl TrBuffSegmMut<T>, Self::Err>>;
+        MayCancelOutput = SomeOf<impl 'a + TrBuffSegmMut<T>, Self::Err>>;
 
     fn as_output(&mut self) -> impl TrOutput<T>
     where
@@ -28,6 +31,6 @@ pub trait TrBuffWrite<T = u8> {
 pub trait TrBuffTryWrite<T = u8>: TrBuffWrite<T> {
     fn try_write<'a>(
         &'a mut self,
-        demand: &Demand<usize>,
+        demand: &impl RangeBounds<usize>,
     ) -> SomeOf<impl 'a + TrBuffSegmMut<T>, Self::Err>;
 }
