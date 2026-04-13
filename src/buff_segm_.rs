@@ -16,9 +16,9 @@ pub trait TrBuffSegmView {
     fn capacity(&self) -> usize;
 
     /// Iterate the unconsumed parts of the segment slice by slice.
-    fn iter_slices(
-        &self,
-    ) -> impl IntoIterator<Item: AsRef<[Self::Item]>>;
+    fn iter_slices<'a>(
+        &'a self,
+    ) -> impl IntoIterator<Item: 'a + AsRef<[Self::Item]>>;
 }
 
 /// A buffer that its data is organized with one or more slices
@@ -32,7 +32,7 @@ where
     fn take_segm_ref<'a>(
         &'a mut self,
         length: &impl RangeBounds<usize>,
-    ) -> impl Try<Output: 'a + TrBuffSegmRef<T>>;
+    ) -> impl 'a + Try<Output: 'a + TrBuffSegmRef<T>>;
 
     /// Turn the borrow of this segment into an input so that its internal data
     /// can be read by copying or moving.
@@ -55,13 +55,13 @@ where
     fn take_segm_mut<'a>(
         &'a mut self,
         length: &impl RangeBounds<usize>,
-    ) -> impl Try<Output: 'a + TrBuffSegmMut<T>>;
+    ) -> impl 'a + Try<Output: 'a + TrBuffSegmMut<T>>;
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// mut slices.
     fn iter_slices_mut<'a>(
         &'a mut self,
-    ) -> impl IntoIterator<Item: AsMut<[MaybeUninit<T>]>>
+    ) -> impl IntoIterator<Item: 'a + AsMut<[MaybeUninit<T>]>>
     where
         T: 'a;
 
