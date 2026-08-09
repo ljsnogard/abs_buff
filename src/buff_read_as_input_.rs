@@ -4,16 +4,13 @@ use core::{
     mem::MaybeUninit,
 };
 
-use abs_sync::{
-    cancellation::TrCancellationToken,
-    may_cancel::TrMayCancel,
-};
+use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_input_::buff_segm_ref_read,
-    TrBuffRead, TrInput,
+    Demand, TrBuffRead, TrInput,
 };
 
 pub struct BuffReadAsInput<B, R, T>(B, PhantomData<R>, PhantomData<[T]>)
@@ -28,6 +25,13 @@ where
 {
     pub const fn new(r: B) -> Self {
         BuffReadAsInput(r, PhantomData, PhantomData)
+    }
+
+    pub fn read_async<'a>(
+        &'a mut self,
+        target: &'a mut [MaybeUninit<T>],
+    ) -> BuffReadInputAsync<'a, R, T> {
+        BuffReadInputAsync(self.0.borrow_mut(), target)
     }
 }
 
@@ -56,11 +60,12 @@ where
 {
     type Err = <R as TrBuffRead<T>>::Err;
 
+    #[inline]
     fn read_async<'a>(
         &'a mut self,
         target: &'a mut [MaybeUninit<T>],
     ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>> {
-        BuffReadInputAsync(self.0.borrow_mut(), target)
+        BuffReadAsInput::read_async(self, target)
     }
 }
 
@@ -74,7 +79,7 @@ where
     R: TrBuffRead<T>,
     C: TrCancellationToken,
 {
-    let demand = ..target.len();
+    let demand = Demand::less_than(target.len());
     buff_r
         .read_async(&demand)
         .may_cancel_with(cancel)

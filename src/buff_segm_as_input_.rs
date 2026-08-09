@@ -7,13 +7,14 @@ use core::{
     ptr
 };
 
-use abs_sync::{cancellation::TrCancellationToken, may_cancel::TrMayCancel};
+use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_::{TrBuffSegmRef, TrBuffSegmView},
     io::TrInput,
+    Demand,
 };
 
 pub struct BuffSegmRefAsInput<B, S, T>
@@ -91,8 +92,8 @@ where
     S: TrBuffSegmRef<T>,
     T: Sized,
 {
-    let length = ..target.len();
-    let branch = segment.take_segm_ref(&length).branch();
+    let demand = Demand::less_than(target.len());
+    let branch = segment.take_segm_ref(&demand).branch();
     let ControlFlow::Continue(parts) = branch else {
         return 0;
     };

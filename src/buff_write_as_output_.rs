@@ -4,16 +4,13 @@ use core::{
     mem::MaybeUninit,
 };
 
-use abs_sync::{
-    cancellation::TrCancellationToken,
-    may_cancel::TrMayCancel,
-};
+use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_output_::{buff_segm_mut_write, buff_segm_mut_write_cloned},
-    TrBuffWrite, TrOutput,
+    Demand, TrBuffWrite, TrOutput,
 };
 
 pub struct BuffWriteAsOutput<B, W, T>(B, PhantomData<W>, PhantomData<[T]>)
@@ -103,7 +100,7 @@ where
     W: TrBuffWrite<T>,
     C: TrCancellationToken,
 {
-    let demand = ..source.len();
+    let demand = Demand::less_than(source.len());
     buff_w
         .write_async(&demand)
         .may_cancel_with(cancel)
@@ -122,7 +119,7 @@ where
     T: Clone,
     C: TrCancellationToken,
 {
-    let demand = ..source.len();
+    let demand = Demand::less_than(source.len());
     buff_w
         .write_async(&demand)
         .may_cancel_with(cancel)

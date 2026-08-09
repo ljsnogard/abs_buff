@@ -1,7 +1,4 @@
-﻿// To allow Box<dyn Future>
-// #![feature(allocator_api)]
-
-// to enable no hand-written poll
+﻿// to enable no hand-written poll
 #![feature(async_fn_traits)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(unboxed_closures)]
@@ -24,6 +21,7 @@ mod buff_write_as_output_;
 mod buff_segm_;
 mod buff_segm_as_input_;
 mod buff_segm_as_output_;
+
 mod demand_;
 mod peeker_;
 mod reader_;
@@ -47,14 +45,14 @@ pub use buff_segm_as_output_::{
     BuffSegmMutOutputClonedAsync, BuffSegmMutOutputClonedFuture,
 };
 pub use demand_::Demand;
-pub use io::{TrInput, TrOutput};
+pub use io::{BufferElem, BufferSlot, TrBuffer, TrMaybeUninit, TrInput, TrOutput};
 pub use peeker_::{TrBuffPeek, TrBuffTryPeek};
 pub use reader_::{TrBuffRead, TrBuffTryRead};
 pub use writer_::{TrBuffWrite, TrBuffTryWrite};
 
 pub mod x_deps {
     pub use abs_iter;
-    pub use abs_sync;
+    pub use abs_cancel;
     pub use anylr;
     pub use gen_mcf_macro;
 }

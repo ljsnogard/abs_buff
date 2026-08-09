@@ -1,9 +1,9 @@
 ﻿use core::{
     mem::MaybeUninit,
-    ops::{RangeBounds, Try},
+    ops::Try,
 };
 
-use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, TrInput, TrOutput};
+use crate::{BuffSegmRefAsInput, BuffSegmMutAsOutput, Demand, TrInput, TrOutput};
 
 pub trait TrBuffSegmView {
     type Item: Sized;
@@ -31,7 +31,7 @@ where
     /// when the taken slice drops.
     fn take_segm_ref<'a>(
         &'a mut self,
-        length: &impl RangeBounds<usize>,
+        demand: &Demand<usize>,
     ) -> impl 'a + Try<Output: 'a + TrBuffSegmRef<T>>;
 
     /// Turn the borrow of this segment into an input so that its internal data
@@ -54,19 +54,17 @@ where
     /// when the taken slice drops.
     fn take_segm_mut<'a>(
         &'a mut self,
-        length: &impl RangeBounds<usize>,
+        demand: &Demand<usize>,
     ) -> impl 'a + Try<Output: 'a + TrBuffSegmMut<T>>;
 
     /// Iterate the unconsumed parts of the segment one by one in the form of
     /// mut slices.
     fn iter_slices_mut<'a>(
         &'a mut self,
-    ) -> impl IntoIterator<Item: 'a + AsMut<[MaybeUninit<T>]>>
-    where
-        T: 'a;
+    ) -> impl IntoIterator<Item: 'a + AsMut<[MaybeUninit<T>]>>;
 
-    /// Turn the mutable borrow of this segment into an output so that its internal
-    /// buffer can be filled by copying or moving.
+    /// Turn the mutable borrow of this segment into an output device so that
+    /// its internal buffer can be filled by copying or moving.
     fn as_output(&mut self) -> impl TrOutput<T>
     where
         Self: Sized,

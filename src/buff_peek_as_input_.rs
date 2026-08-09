@@ -5,16 +5,13 @@ use core::{
     ops::{ControlFlow, Try},
 };
 
-use abs_sync::{
-    cancellation::TrCancellationToken,
-    may_cancel::TrMayCancel,
-};
+use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
     buff_segm_as_input_::buff_segm_ref_read,
-    TrBuffPeek, TrBuffSegmRef, TrInput,
+    Demand, TrBuffPeek, TrBuffSegmRef, TrInput,
 };
 
 pub struct BuffPeekAsInput<B, P, T>
@@ -40,6 +37,13 @@ where
             _use_p_: PhantomData,
             _use_t_: PhantomData,
         }
+    }
+
+    pub fn read_async<'a>(
+        &'a mut self,
+        target: &'a mut [MaybeUninit<T>],
+    ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, <P as TrBuffPeek<T>>::Err>> {
+        BuffPeekInputAsync(self, target)
     }
 }
 
@@ -95,16 +99,16 @@ where
         .into_any_of()
         .split();
     let mut copied = 0usize;
-    if let Option::Some(mut segment) = opt_segm {
-        let length = ..input.offset_;
+    if let Option::Some(mut segm) = opt_segm {
+        let demand = Demand::less_than(target.len() - copied);
         if true {
-            let branch = segment.take_segm_ref(&length).branch();
+            let branch = segm.take_segm_ref(&demand).branch();
             let ControlFlow::Continue(prev_done) = branch else {
                 return SomeOf::new_left(copied)
             };
             drop(prev_done);
         }
-        copied = buff_segm_ref_read(&mut segment, target);
+        copied = buff_segm_ref_read(&mut segm, target);
     };
     input.offset_ += copied;
     if let Option::Some(err) = opt_err {
