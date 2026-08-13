@@ -20,6 +20,8 @@ pub trait TrBuffRead<T = u8> {
         demand: &Demand<usize>,
     ) -> impl TrMayCancel<'f, MayCancelOutput = SomeOf<Self::SegmRef<'f>, Self::Err>>;
 
+    /// Turns the mutable borrow of the buffer into an input.
+    /// It has a default implementation that yields `BuffReadAsInput`
     fn as_input(&mut self) -> impl TrInput<T>
     where
         Self: Sized,

@@ -20,6 +20,8 @@ pub trait TrBuffWrite<T = u8> {
         demand: &Demand<usize>,
     ) -> impl TrMayCancel<'f, MayCancelOutput = SomeOf<Self::SegmMut<'f>, Self::Err>>;
 
+    /// Turns the mutable borrow of the buffer into an output.
+    /// It has a default implementation that yields `BuffWriteAsOutput`
     fn as_output(&mut self) -> impl TrOutput<T>
     where
         Self: Sized,
