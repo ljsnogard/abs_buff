@@ -13,6 +13,12 @@ pub trait TrBuffRead<T = u8> {
     type SegmRef<'a>: TrBuffSegmRef<T> where Self: 'a;
     type Err: Error;
 
+    /// Indicates whether this buff will no longer emits any data.
+    ///
+    /// This function lets the user knows when to stop consuming loop regardless
+    /// any knowledge of the error type.
+    fn is_drained(&self) -> bool;
+
     /// Emits borrowed segment which carries the buffered items. The amount of items
     /// can be specified by the parameter `demand`.
     fn read_async<'f>(

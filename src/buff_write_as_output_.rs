@@ -5,7 +5,9 @@ use core::{
 };
 
 use abs_cancel::{TrCancellationToken, TrMayCancel};
-use anylr::SomeOf;
+
+use anylr:: SomeOf;
+
 use gen_mcf_macro::gen_may_cancel_future;
 
 use crate::{
