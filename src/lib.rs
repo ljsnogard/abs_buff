@@ -47,7 +47,7 @@ pub use buff_segm_as_output_::{
     BuffSegmMutOutputClonedAsync, BuffSegmMutOutputClonedFuture,
 };
 pub use demand_::Demand;
-pub use io::{BufferElem, BufferSlot, TrBuffer, TrMaybeUninit, TrInput, TrOutput};
+
 pub use peeker_::{TrBuffPeek, TrBuffTryPeek};
 pub use reader_::{TrBuffRead, TrBuffTryRead};
 pub use writer_::{TrBuffWrite, TrBuffTryWrite};
@@ -58,3 +58,6 @@ pub mod x_deps {
     pub use anylr;
     pub use gen_mcf_macro;
 }
+
+#[cfg(any(test, feature = "std_io"))]
+pub mod as_std_read;

@@ -15,3 +15,5 @@ anylr = { git = "https://gitee.com/lino_snsalias/anylr.rs.git", branch = "dev/0.
 abs_iter = { git = "https://gitee.com/lino_snsalias/abs_iter.git" }
 abs_cancel = { git = "https://gitee.com/lino_snsalias/abs_cancel-rs.git" }
 gen_mcf_macro = { git = "https://gitee.com/lino_snsalias/gen_mcf_macro.rs.git", branch = "dev/0.3.0" }
+
+funty = { version = "3.0.0-rc2", default-features = false }
