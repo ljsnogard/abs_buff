@@ -66,6 +66,47 @@ where
     /// To end the evaluation of recursive downcast from TrBuffSegmRef.
     /// A `SegmRef<T>` can move items to a `SegmMut<T>`.
     fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, Self::Reclaimer<'f>>;
+
+    /// Do a memory copy to the target `SegmMut<T>`.
+    ///
+    /// The items that are being memory copied will be treated as moved and
+    /// will no longer drop by this `SegmRef<T>`. And the return result of
+    /// `least_count()`, either from this `SegmRef<T>` or from the target
+    /// `SegmMut<T>` shall change.
+    fn move_items_to_segm<'f, TyTarget>(
+        &'f mut self,
+        target: &'f mut TyTarget,
+    ) -> usize
+    where
+        // 注意：trait 生命周期 `'a` 与借用生命周期 `'f` 解耦——若把约束写为
+        // `TrBuffSegmMut<'f, T>`，`'f` 会被绑定到目标段的生命周期，导致搬移后
+        // 段仍处于借用中、无法继续使用。
+        TyTarget: TrBuffSegmMut<'a, T>,
+    {
+        let mut c = 0usize;
+        while self.least_count() > 0 && target.least_count() > 0 {
+            let mut src_segm = self.as_segm_ref();
+            let mut dst_segm = target.as_segm_mut();
+            c += src_segm.move_items_to_segm(&mut dst_segm);
+        }
+        c
+    }
+
+    /// 把本段剩余元素搬出到 `dst`（按两段顺序取出），并推进已消费量。
+    ///
+    /// ## Safety
+    ///
+    /// 搬移为位拷贝：被搬出的元素不再由本段 drop，调用方需保证 `T` 无需要
+    /// drop 的资源（或由 `dst` 负责）。
+    unsafe fn move_items_to_buff(&mut self, dst: &mut [MaybeUninit<T>]) -> usize {
+        let mut c = 0usize;
+        while self.least_count() > 0 && c < dst.len() {
+            let mut segm = self.as_segm_ref();
+            let dst_buff = &mut dst[c..];
+            c += unsafe { segm.move_items_to_buff(dst_buff) };
+        }
+        c
+    }
 }
 
 /// A buffer that its data is organized with one or more slices mut.
@@ -89,6 +130,43 @@ where
     ) -> impl Try<Output: TrBuffSegmMut<'f, T>>;
 
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>>;
+
+    /// Do a memory copy to the target `SegmMut<T>`.
+    ///
+    /// This function heavily relies on `as_segm_mut` and `as_segm_ref` to
+    /// do the actual memory copying.
+    fn move_items_from_segm<'f, TySource>(
+        &'f mut self,
+        source: &'f mut TySource,
+    ) -> usize
+    where
+        // 同 [`TrBuffSegmRef::move_items_to_segm`]：trait 生命周期与借用解耦。
+        TySource: TrBuffSegmRef<'a, T>,
+    {
+        let mut c = 0usize;
+        while self.least_count() > 0 && source.least_count() > 0 {
+            let mut dst_segm = self.as_segm_mut();
+            let mut src_segm = source.as_segm_ref();
+            c += dst_segm.move_items_from_segm(&mut src_segm);
+        }
+        c
+    }
+
+    /// 把 `src` 的元素搬进本段（按两段顺序填充），并推进已消费量。
+    ///
+    /// ## Safety
+    ///
+    /// 搬移为位拷贝：`src` 中被搬走的元素在搬移后不再被 drop，调用方需保证
+    /// `T` 无需要 drop 的资源（或自行处理 `src` 剩余元素）。
+    unsafe fn move_items_from_buff(&mut self, src: &mut [MaybeUninit<T>]) -> usize {
+        let mut c = 0usize;
+        while self.least_count() > 0 && c < src.len() {
+            let mut segm = self.as_segm_mut();
+            let src_buff = &mut src[c..];
+            c += unsafe { segm.move_items_from_buff(src_buff) };
+        }
+        c
+    }
 }
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -130,7 +208,7 @@ pub struct SegmRef<'a, T, R>
 where
     R: TrReclaim,
 {
-    buffer_: &'a mut [T],
+    buffer_: &'a [T],
     offset_: usize,
     reclaim_: Option<R>,
     _pinned_: PhantomPinned,
@@ -157,7 +235,7 @@ where
     /// Create by borrowing a slice from an implicit source. And the items of
     /// this slice will be returned back to or moved out of the source by
     /// `reclaim`.
-    pub const fn new(buffer: &'a mut [T], reclaim: R) -> Self {
+    pub const fn new(buffer: &'a [T], reclaim: R) -> Self {
         SegmRef {
             buffer_: buffer,
             offset_: 0usize,
@@ -194,7 +272,7 @@ where
     }
 
     pub fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, SegmReclaim<'f>> {
-        let buffer = &mut self.buffer_[self.offset_..];
+        let buffer = &self.buffer_[self.offset_..];
         let reclaim = SegmReclaim::new(&mut self.offset_);
         SegmRef::new(buffer, reclaim)
     }
@@ -245,7 +323,7 @@ where
             ptr::copy_nonoverlapping(src, dst, count);
         }
         self.offset_ += count;
-        return count;
+        count
     }
 
     pub fn clone_items_to_segm<TyRecl>(
@@ -300,11 +378,9 @@ where
             return Option::None;
         };
         let available = Demand::less_than(c);
-        let Option::Some(agreement) = demand.compromise(&available) else {
-            return Option::None;
-        };
+        let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
-        let dst = &mut self.buffer_[self.offset_..self.offset_ + max_len];
+        let dst = &self.buffer_[self.offset_..self.offset_ + max_len];
         let reclaim = SegmReclaim::new(&mut self.offset_);
         let child = SegmRef::new(dst, reclaim);
         Option::Some(child)
@@ -414,7 +490,7 @@ where
             ptr::copy_nonoverlapping(src, dst, count);
         }
         self.offset_ += count;
-        return count;
+        count
     }
 
     pub fn clone_items_from_buff(&mut self, source: &[T]) -> usize
@@ -444,9 +520,7 @@ where
             return Option::None;
         };
         let available = Demand::less_than(c);
-        let Option::Some(agreement) = demand.compromise(&available) else {
-            return Option::None;
-        };
+        let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
         let dst = &mut self.buffer_[self.offset_..self.offset_ + max_len];
         let reclaim = SegmReclaim::new(&mut self.offset_);
@@ -1052,5 +1126,111 @@ mod tests_ {
             assert_eq!(segm.least_count(), 2);
         }
         assert_eq!(consumed, 2);
+    }
+
+    //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+    // 泛型段测试：move_items_* 的 trait 默认实现（SegmRef / SegmMut）
+    //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+    //
+    // 测试意图：abs_buff 把 `move_items_*` 提升为 `TrBuffSegmRef` /
+    // `TrBuffSegmMut` 的 trait 默认方法，任何实现者都必须满足这些默认实现的
+    // 语义。这里用 `buffer::segm_tests` 的泛型函数验证本 crate 自己的
+    // `SegmRef` / `SegmMut`：数据按序搬移、消费量正确推进、无重复无丢失。
+    //
+    // 内部执行设计：每个方向用一个"源 Vec + 目标数组"的简单存储，段持有
+    // `SegmReclaim` 计数器；泛型函数在段层面断言搬移数量与消费量，测试主体
+    // 在底层存储上断言内容按序到达、回收计数器精确提交。
+
+    /// 通过 trait 默认实现把 `SegmRef` 的全部元素搬进 `SegmMut`
+    /// （`move_items_to_segm` 与镜像的 `move_items_from_segm` 都验证）。
+    #[test]
+    fn segm_move_items_trait_defaults() {
+        use crate::buffer::segm_tests as t;
+
+        // —— move_items_to_segm（源段一侧发起）——
+        {
+            let mut src_data: Vec<u64> = (0..16).collect();
+            let mut dst_data = [MaybeUninit::<u64>::uninit(); 16];
+            let mut src_consumed = 0usize;
+            let mut dst_consumed = 0usize;
+            let expect: Vec<u64> = (0..16).collect();
+            let mut src = SegmRef::new(
+                src_data.as_mut_slice(),
+                SegmReclaim::new(&mut src_consumed),
+            );
+            let mut dst = SegmMut::new(
+                &mut dst_data[..],
+                SegmReclaim::new(&mut dst_consumed),
+            );
+            let moved = t::test_move_items_to_segm(&mut src, &mut dst, &expect);
+            assert_eq!(moved, 16, "泛型函数应返回搬移数量");
+            // 泛型函数已内部断言 src/dst 的 least_count == 0；这里再校验
+            // 底层存储与回收计数（段 drop 时提交消费量）；
+            drop(src);
+            drop(dst);
+            assert_eq!(read_init(&dst_data), expect, "内容必须按序搬入目标");
+            assert_eq!(src_consumed, 16, "源段必须按消费量提交");
+            assert_eq!(dst_consumed, 16, "目标段必须按消费量提交");
+        }
+
+        // —— move_items_from_segm（目标段一侧发起，镜像）——
+        {
+            let mut src_data: Vec<u32> = (10..26).collect();
+            let mut dst_data = [MaybeUninit::<u32>::uninit(); 16];
+            let mut src_consumed = 0usize;
+            let mut dst_consumed = 0usize;
+            let expect: Vec<u32> = (10..26).collect();
+            let mut src = SegmRef::new(
+                src_data.as_mut_slice(),
+                SegmReclaim::new(&mut src_consumed),
+            );
+            let mut dst = SegmMut::new(
+                &mut dst_data[..],
+                SegmReclaim::new(&mut dst_consumed),
+            );
+            let moved = t::test_move_items_from_segm(&mut src, &mut dst, &expect);
+            assert_eq!(moved, 16);
+            drop(src);
+            drop(dst);
+            assert_eq!(read_init(&dst_data), expect, "内容必须按序搬入目标");
+            assert_eq!(src_consumed, 16);
+            assert_eq!(dst_consumed, 16);
+        }
+
+        // —— move_items_to_buff（源段 → 普通缓冲）——
+        {
+            let mut src_data: Vec<u8> = (0..16).collect();
+            let mut dst_buf = [MaybeUninit::<u8>::uninit(); 16];
+            let mut consumed = 0usize;
+            let expect: Vec<u8> = (0..16).collect();
+            let mut src = SegmRef::new(
+                src_data.as_mut_slice(),
+                SegmReclaim::new(&mut consumed),
+            );
+            // SAFETY: u8 无 drop，位拷贝安全；
+            let moved = unsafe { t::test_move_items_to_buff(&mut src, &mut dst_buf, &expect) };
+            assert_eq!(moved, 16);
+            drop(src);
+            assert_eq!(read_init(&dst_buf), expect, "缓冲内容必须按序");
+            assert_eq!(consumed, 16);
+        }
+
+        // —— move_items_from_buff（普通缓冲 → 目标段）——
+        {
+            let mut dst_data = [MaybeUninit::<usize>::uninit(); 16];
+            let mut src_buf = [MaybeUninit::<usize>::uninit(); 16];
+            let mut consumed = 0usize;
+            let expect: Vec<usize> = (100..116).collect();
+            let mut dst = SegmMut::new(
+                &mut dst_data[..],
+                SegmReclaim::new(&mut consumed),
+            );
+            // SAFETY: usize 无 drop，位拷贝安全；
+            let moved = unsafe { t::test_move_items_from_buff(&mut dst, &mut src_buf, &expect) };
+            assert_eq!(moved, 16);
+            drop(dst);
+            assert_eq!(read_init(&dst_data), expect, "目标段内容必须按序");
+            assert_eq!(consumed, 16);
+        }
     }
 }

@@ -19,6 +19,7 @@ gen_mcf_macro = { git = "https://gitee.com/lino_snsalias/gen_mcf_macro.rs.git", 
 funty = { version = "3.0.0-rc2", default-features = false }
 
 [features]
+segm-tests = []
 std_write = []
 std_read = []
 std_io = ["std_read", "std_write"]
