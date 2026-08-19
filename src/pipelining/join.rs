@@ -266,10 +266,9 @@ mod tests_ {
                 take = core::cmp::min(take, self.chunk);
             }
             take = core::cmp::min(take, self.data.len() - self.pos);
-            let segm = SegmRef::new(
-                &mut self.data[self.pos..self.pos + take],
-                SegmReclaim::new(&mut self.pos),
-            );
+            let buffer = &mut self.data[self.pos..self.pos + take];
+            let reclaim = SegmReclaim::new(Pin::new(&mut self.pos));
+            let segm = SegmRef::new(buffer, reclaim);
             ReadySegm::new(SomeOf::new_left(segm))
         }
     }
@@ -328,7 +327,7 @@ mod tests_ {
             );
             let segm = SegmMut::new(
                 &mut self.buff[self.pos..self.pos + take],
-                SegmReclaim::new(&mut self.pos),
+                SegmReclaim::new(Pin::new(&mut self.pos)),
             );
             ReadySegm::new(SomeOf::new_left(segm))
         }

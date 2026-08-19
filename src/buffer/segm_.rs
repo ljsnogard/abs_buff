@@ -1,9 +1,18 @@
 use core::{
-    borrow::BorrowMut, cmp, marker::PhantomPinned, mem::MaybeUninit, ops::Try,
+    borrow::BorrowMut,
+    cmp,
+    marker::PhantomPinned,
+    mem::MaybeUninit,
+    ops::Try,
+    pin::Pin,
     ptr, slice,
 };
 
-use crate::Demand;
+use abs_cancel::{TrCancellationToken, TrMayCancel};
+use anylr::SomeOf;
+use gen_mcf_macro::gen_may_cancel_future;
+
+use crate::{Demand, io::{TrInput, TrOutput}};
 
 /// Represent a sequence of slices who are logically the same array but
 /// physically not.
@@ -30,14 +39,14 @@ where
 {
     /// Indicate the reclaimer the amount of consumption, and returns the
     /// amount before the consumption.
-    fn reclaim(&self, amount: usize) -> usize;
+    fn reclaim(&mut self, amount: usize) -> usize;
 }
 
 impl<F> TrReclaim for F
 where
     F: Fn(usize) -> usize + Send + Sync,
 {
-    fn reclaim(&self, amount: usize) -> usize {
+    fn reclaim(&mut self, amount: usize) -> usize {
         let f = self;
         f(amount)
     }
@@ -98,7 +107,10 @@ where
     ///
     /// 搬移为位拷贝：被搬出的元素不再由本段 drop，调用方需保证 `T` 无需要
     /// drop 的资源（或由 `dst` 负责）。
-    unsafe fn move_items_to_buff(&mut self, dst: &mut [MaybeUninit<T>]) -> usize {
+    unsafe fn move_items_to_buff(
+        &mut self,
+        dst: &mut [MaybeUninit<T>],
+    ) -> usize {
         let mut c = 0usize;
         while self.least_count() > 0 && c < dst.len() {
             let mut segm = self.as_segm_ref();
@@ -158,7 +170,10 @@ where
     ///
     /// 搬移为位拷贝：`src` 中被搬走的元素在搬移后不再被 drop，调用方需保证
     /// `T` 无需要 drop 的资源（或自行处理 `src` 剩余元素）。
-    unsafe fn move_items_from_buff(&mut self, src: &mut [MaybeUninit<T>]) -> usize {
+    unsafe fn move_items_from_buff(
+        &mut self,
+        src: &mut [MaybeUninit<T>],
+    ) -> usize {
         let mut c = 0usize;
         while self.least_count() > 0 && c < src.len() {
             let mut segm = self.as_segm_mut();
@@ -173,21 +188,22 @@ where
 // SegmReclaim,
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-pub struct SegmReclaim<'a>(&'a mut usize);
+pub struct SegmReclaim<'a>(Pin<&'a mut usize>);
 
 impl<'a> SegmReclaim<'a> {
-    pub(crate) const fn new(p: &'a mut usize) -> Self {
+    pub const fn new(p: Pin<&'a mut usize>) -> Self {
         SegmReclaim(p)
     }
 }
 
 impl<'a> TrReclaim for SegmReclaim<'a> {
     #[inline]
-    fn reclaim(&self, amount: usize) -> usize {
+    fn reclaim(&mut self, amount: usize) -> usize {
+        let p = self.0.as_mut();
         // This safe if the one who creates this `SegmReclaim` guarantees that,
         // It is always created within a borrow mut context.
         unsafe {
-            let p = self.0 as *const _ as *mut usize;
+            let p = p.get_mut() as *mut usize;
             let c = &mut *p;
             let x = *c;
             *c += amount;
@@ -273,7 +289,7 @@ where
 
     pub fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, SegmReclaim<'f>> {
         let buffer = &self.buffer_[self.offset_..];
-        let reclaim = SegmReclaim::new(&mut self.offset_);
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         SegmRef::new(buffer, reclaim)
     }
 
@@ -295,6 +311,17 @@ where
         debug_assert!(count <= target.least_count());
         target.offset_ += count;
         count
+    }
+
+    pub fn move_items_to_output_async<'f, TyOutput>(
+        &'f mut self,
+        output: &'f mut TyOutput,
+        demand: &'f Demand<usize>,
+    ) -> SegmRefOutputAsync<'a, 'f, T, R, TyOutput>
+    where
+        TyOutput: TrOutput<T>,
+    {
+        SegmRefOutputAsync(self, output, demand)
     }
 
     /// Do a memory copy to the target buffer. And the items that are being
@@ -381,7 +408,7 @@ where
         let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
         let dst = &self.buffer_[self.offset_..self.offset_ + max_len];
-        let reclaim = SegmReclaim::new(&mut self.offset_);
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         let child = SegmRef::new(dst, reclaim);
         Option::Some(child)
     }
@@ -445,7 +472,7 @@ where
 
     pub fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, SegmReclaim<'f>> {
         let buffer = &mut self.buffer_[self.offset_..];
-        let reclaim = SegmReclaim::new(&mut self.offset_);
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         SegmMut::new(buffer, reclaim)
     }
 
@@ -464,6 +491,17 @@ where
         TyRecl: TrReclaim,
     {
         source.move_items_to_segm(self)
+    }
+
+    pub fn move_items_from_input_async<'f, TyInput>(
+        &'f mut self,
+        input: &'f mut TyInput,
+        demand: &'f Demand<usize>,
+    ) -> SegmMutInputAsync<'a, 'f, T, R, TyInput>
+    where
+        TyInput: TrInput<T>,
+    {
+        SegmMutInputAsync(self, input, demand)
     }
 
     /// Do a memory copy to the target buffer. And the items that are being
@@ -523,7 +561,7 @@ where
         let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
         let dst = &mut self.buffer_[self.offset_..self.offset_ + max_len];
-        let reclaim = SegmReclaim::new(&mut self.offset_);
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         let child = SegmMut::new(dst, reclaim);
         Option::Some(child)
     }
@@ -538,7 +576,7 @@ where
     R: TrReclaim,
 {
     fn drop(&mut self) {
-        let Option::Some(r) = self.reclaim_.take() else {
+        let Option::Some(mut r) = self.reclaim_.take() else {
             return;
         };
         r.reclaim(self.offset_);
@@ -550,7 +588,7 @@ where
     R: TrReclaim,
 {
     fn drop(&mut self) {
-        let Option::Some(r) = self.reclaim_.take() else {
+        let Option::Some(mut r) = self.reclaim_.take() else {
             return;
         };
         r.reclaim(self.offset_);
@@ -655,6 +693,114 @@ where
     }
 }
 
+#[gen_may_cancel_future(SegmRefOutput)]
+async fn segm_ref_output_async_<'a, 'f, TyData, TyRecl, TyOut, TyTok>(
+    segm: &'f mut SegmRef<'a, TyData, TyRecl>,
+    output: &'f mut TyOut,
+    demand: &'f Demand<usize>,
+    cancel: &'f mut TyTok,
+) -> SomeOf<usize, <TyOut as TrOutput<TyData>>::Err>
+where
+    'a: 'f,
+    TyRecl: TrReclaim,
+    TyOut: TrOutput<TyData>,
+    TyTok: TrCancellationToken + Clone,
+{
+    let buff = &segm.buffer_[segm.offset_..];
+    let size = buff.len();
+    let Option::Some(compromised) = demand.compromise(&Demand::less_than(size))
+    else {
+        return SomeOf::new_left(0usize);
+    };
+    let Option::Some(max) = compromised.max() else {
+        unreachable!()
+    };
+    let max = *max;
+    debug_assert!(max <= size);
+    let mut c = 0usize;
+    loop {
+        if c >= max {
+            return SomeOf::new_left(c);
+        };
+        let remaining = size - c;
+        let take = core::cmp::min(remaining, max - c);
+        let buff = &buff[c..];
+        let source = {
+            let p = buff.as_ptr() as *const _ as *const MaybeUninit<TyData>;
+            unsafe { slice::from_raw_parts(p, take) }
+        };
+        let x = output.write_async(source).may_cancel_with(cancel).await;
+        if let Option::Some(cc) = x.as_ref().pick_left() {
+            segm.offset_ += *cc;
+            c += cc;
+        };
+        if let Option::Some(err) = x.pick_right() {
+            return SomeOf::new_both(c, err);
+        };
+        if core::hint::black_box(false) {
+            // this is just to please the compiler, will never enter.
+            // However, if it did enter, we have to know.
+            assert!(c > 0usize);
+            break;
+        }
+    }
+    SomeOf::new_left(c)
+}
+
+#[gen_may_cancel_future(SegmMutInput)]
+async fn segm_mut_input_async_<'a, 'f, TyData, TyRecl, TyInput, TyTok>(
+    segm: &'f mut SegmMut<'a, TyData, TyRecl>,
+    input: &'f mut TyInput,
+    demand: &'f Demand<usize>,
+    cancel: &'f mut TyTok,
+) -> SomeOf<usize, <TyInput as TrInput<TyData>>::Err>
+where
+    'a: 'f,
+    TyRecl: TrReclaim,
+    TyInput: TrInput<TyData>,
+    TyTok: TrCancellationToken + Clone,
+{
+    let buff = &mut segm.buffer_[segm.offset_..];
+    let size = buff.len();
+    let Option::Some(compromised) = demand.compromise(&Demand::less_than(size))
+    else {
+        return SomeOf::new_left(0usize);
+    };
+    let Option::Some(max) = compromised.max() else {
+        unreachable!()
+    };
+    let max = *max;
+    debug_assert!(max <= size);
+    let mut c = 0usize;
+    loop {
+        if c >= max {
+            return SomeOf::new_left(c);
+        };
+        let remaining = size - c;
+        let take = core::cmp::min(remaining, max - c);
+        let buff = &mut buff[c..];
+        let target = {
+            let p = buff.as_mut_ptr();
+            unsafe { slice::from_raw_parts_mut(p, take) }
+        };
+        let x = input.read_async(target).may_cancel_with(cancel).await;
+        if let Option::Some(cc) = x.as_ref().pick_left() {
+            segm.offset_ += *cc;
+            c += cc;
+        };
+        if let Option::Some(err) = x.pick_right() {
+            return SomeOf::new_both(c, err);
+        };
+        if core::hint::black_box(false) {
+            // this is just to please the compiler, will never enter.
+            // However, if it did enter, we have to know.
+            assert!(c > 0usize);
+            break;
+        }
+    }
+    SomeOf::new_left(c)
+}
+
 #[cfg(test)]
 mod tests_ {
     use std::{vec, vec::Vec};
@@ -688,9 +834,10 @@ mod tests_ {
         const LEN: usize = 64;
         let mut data: Vec<usize> = (0..LEN).collect();
         let mut consumed = 0usize;
-
-        let mut segm =
-            SegmRef::new(data.as_mut_slice(), SegmReclaim::new(&mut consumed));
+        let mut segm = SegmRef::new(
+            data.as_mut_slice(),
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         // 1st borrow: exactly 10 items, starting at the beginning.
         {
@@ -762,9 +909,10 @@ mod tests_ {
         const LEN: usize = 24;
         let mut data: Vec<u32> = (0..LEN as u32).collect();
         let mut consumed = 0usize;
-
-        let mut segm =
-            SegmRef::new(data.as_mut_slice(), SegmReclaim::new(&mut consumed));
+        let mut segm = SegmRef::new(
+            data.as_mut_slice(),
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         // Round 1: as_segm_ref borrows everything that is left; consume 16.
         {
@@ -814,13 +962,13 @@ mod tests_ {
 
         let mut src = SegmRef::new(
             src_data.as_mut_slice(),
-            SegmReclaim::new(&mut src_consumed),
+            SegmReclaim::new(Pin::new(&mut src_consumed)),
         );
 
         // Move as much as the first destination can take: 16 of 40.
         let mut dst1 = SegmMut::new(
             &mut dst1_data[..],
-            SegmReclaim::new(&mut dst1_consumed),
+            SegmReclaim::new(Pin::new(&mut dst1_consumed)),
         );
         {
             let mut src_child = src.as_segm_ref();
@@ -836,7 +984,7 @@ mod tests_ {
         // The next move picks up right after the first 16 items.
         let mut dst2 = SegmMut::new(
             &mut dst2_data[..],
-            SegmReclaim::new(&mut dst2_consumed),
+            SegmReclaim::new(Pin::new(&mut dst2_consumed)),
         );
         {
             let mut src_child = src.as_segm_ref();
@@ -874,11 +1022,11 @@ mod tests_ {
 
         let mut src = SegmRef::new(
             src_data.as_mut_slice(),
-            SegmReclaim::new(&mut src_consumed),
+            SegmReclaim::new(Pin::new(&mut src_consumed)),
         );
         let mut dst = SegmMut::new(
             &mut dst_data[..],
-            SegmReclaim::new(&mut dst_consumed),
+            SegmReclaim::new(Pin::new(&mut dst_consumed)),
         );
 
         {
@@ -906,11 +1054,11 @@ mod tests_ {
 
         let mut src = SegmRef::new(
             src_data.as_mut_slice(),
-            SegmReclaim::new(&mut src_consumed),
+            SegmReclaim::new(Pin::new(&mut src_consumed)),
         );
         let mut dst = SegmMut::new(
             &mut dst_data[..],
-            SegmReclaim::new(&mut dst_consumed),
+            SegmReclaim::new(Pin::new(&mut dst_consumed)),
         );
 
         // Cloning does NOT advance the source; the first 8 items land in dst.
@@ -958,8 +1106,10 @@ mod tests_ {
     fn segm_ref_clone_items_to_buff() {
         let mut data = [10usize, 20, 30, 40];
         let mut consumed = 0usize;
-        let segm =
-            SegmRef::new(data.as_mut_slice(), SegmReclaim::new(&mut consumed));
+        let segm = SegmRef::new(
+            data.as_mut_slice(),
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         let mut dst = [MaybeUninit::<usize>::uninit(); 4];
         let n = unsafe { segm.clone_items_to_buff(&mut dst) };
@@ -981,8 +1131,10 @@ mod tests_ {
         let mut storage = [MaybeUninit::<u64>::uninit(); LEN];
         let mut consumed = 0usize;
 
-        let mut segm =
-            SegmMut::new(&mut storage[..], SegmReclaim::new(&mut consumed));
+        let mut segm = SegmMut::new(
+            &mut storage[..],
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         // 1st borrow: 8 slots; receive 8 items.
         let mut src1: Vec<MaybeUninit<u64>> =
@@ -1025,8 +1177,10 @@ mod tests_ {
         let mut storage = [MaybeUninit::<u8>::uninit(); LEN];
         let mut consumed = 0usize;
 
-        let mut segm =
-            SegmMut::new(&mut storage[..], SegmReclaim::new(&mut consumed));
+        let mut segm = SegmMut::new(
+            &mut storage[..],
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         // Round 1: receive 6 items.
         let mut src1: Vec<MaybeUninit<u8>> =
@@ -1068,8 +1222,10 @@ mod tests_ {
         let mut storage = [MaybeUninit::<usize>::uninit(); LEN];
         let mut consumed = 0usize;
 
-        let mut segm =
-            SegmMut::new(&mut storage[..], SegmReclaim::new(&mut consumed));
+        let mut segm = SegmMut::new(
+            &mut storage[..],
+            SegmReclaim::new(Pin::new(&mut consumed)),
+        );
 
         {
             let mut child = segm
@@ -1093,7 +1249,7 @@ mod tests_ {
     #[test]
     fn segm_reclaim_reports_amount_before_consumption() {
         let mut counter = 0usize;
-        let r = SegmReclaim::new(&mut counter);
+        let mut r = SegmReclaim::new(Pin::new(&mut counter));
         assert_eq!(
             r.reclaim(3),
             0,
@@ -1110,7 +1266,7 @@ mod tests_ {
         {
             let mut segm = SegmRef::new(
                 data.as_mut_slice(),
-                SegmReclaim::new(&mut consumed),
+                SegmReclaim::new(Pin::new(&mut consumed)),
             );
             {
                 let mut child = segm
@@ -1156,11 +1312,11 @@ mod tests_ {
             let expect: Vec<u64> = (0..16).collect();
             let mut src = SegmRef::new(
                 src_data.as_mut_slice(),
-                SegmReclaim::new(&mut src_consumed),
+                SegmReclaim::new(Pin::new(&mut src_consumed)),
             );
             let mut dst = SegmMut::new(
                 &mut dst_data[..],
-                SegmReclaim::new(&mut dst_consumed),
+                SegmReclaim::new(Pin::new(&mut dst_consumed)),
             );
             let moved = t::test_move_items_to_segm(&mut src, &mut dst, &expect);
             assert_eq!(moved, 16, "泛型函数应返回搬移数量");
@@ -1182,13 +1338,14 @@ mod tests_ {
             let expect: Vec<u32> = (10..26).collect();
             let mut src = SegmRef::new(
                 src_data.as_mut_slice(),
-                SegmReclaim::new(&mut src_consumed),
+                SegmReclaim::new(Pin::new(&mut src_consumed)),
             );
             let mut dst = SegmMut::new(
                 &mut dst_data[..],
-                SegmReclaim::new(&mut dst_consumed),
+                SegmReclaim::new(Pin::new(&mut dst_consumed)),
             );
-            let moved = t::test_move_items_from_segm(&mut src, &mut dst, &expect);
+            let moved =
+                t::test_move_items_from_segm(&mut src, &mut dst, &expect);
             assert_eq!(moved, 16);
             drop(src);
             drop(dst);
@@ -1205,10 +1362,12 @@ mod tests_ {
             let expect: Vec<u8> = (0..16).collect();
             let mut src = SegmRef::new(
                 src_data.as_mut_slice(),
-                SegmReclaim::new(&mut consumed),
+                SegmReclaim::new(Pin::new(&mut consumed)),
             );
             // SAFETY: u8 无 drop，位拷贝安全；
-            let moved = unsafe { t::test_move_items_to_buff(&mut src, &mut dst_buf, &expect) };
+            let moved = unsafe {
+                t::test_move_items_to_buff(&mut src, &mut dst_buf, &expect)
+            };
             assert_eq!(moved, 16);
             drop(src);
             assert_eq!(read_init(&dst_buf), expect, "缓冲内容必须按序");
@@ -1223,10 +1382,12 @@ mod tests_ {
             let expect: Vec<usize> = (100..116).collect();
             let mut dst = SegmMut::new(
                 &mut dst_data[..],
-                SegmReclaim::new(&mut consumed),
+                SegmReclaim::new(Pin::new(&mut consumed)),
             );
             // SAFETY: usize 无 drop，位拷贝安全；
-            let moved = unsafe { t::test_move_items_from_buff(&mut dst, &mut src_buf, &expect) };
+            let moved = unsafe {
+                t::test_move_items_from_buff(&mut dst, &mut src_buf, &expect)
+            };
             assert_eq!(moved, 16);
             drop(dst);
             assert_eq!(read_init(&dst_data), expect, "目标段内容必须按序");
