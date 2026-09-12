@@ -1,5 +1,4 @@
 // to enable no hand-written poll
-#![feature(async_fn_traits)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(unboxed_closures)]
 #![feature(try_trait_v2)]
@@ -14,6 +13,7 @@ extern crate std;
 pub use gen_mcf_macro::gen_may_cancel_future;
 
 pub mod buffer;
+pub mod error;
 pub mod io;
 pub mod pipelining;
 

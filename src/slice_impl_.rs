@@ -2,10 +2,9 @@ use core::{
     borrow::{Borrow, BorrowMut},
     error::Error,
     fmt,
-    future::{Future, IntoFuture},
+    future::Future,
     marker::PhantomPinned,
     mem::MaybeUninit,
-    ops::Try,
     pin::Pin,
     slice,
     task::{Context, Poll},
@@ -17,31 +16,49 @@ use anylr::SomeOf;
 use crate::{
     Demand, TrBuffRead, TrBuffTryRead, TrBuffTryWrite, TrBuffWrite,
     buffer::{
-        SegmMut, SegmReclaim, SegmRef, TrBuffSegmMut, TrBuffSegmRef,
-        TrBuffSegmView,
+        SegmMut, SegmReclaim, SegmRef,
+        TrBuffSegmMut, TrBuffSegmRef, TrBuffSegmView,
     },
+    error::{ReadErrTag, TrErrTag, TrTaggedError, WriteErrTag},
 };
 
 /// Error returned when a borrowed byte slice is empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BorrowedSliceError {
-    Empty,
+pub enum BorrowedSliceError<TyTag>
+where
+    TyTag: TrErrTag,
+{
+    Empty(TyTag),
 }
 
-impl fmt::Display for BorrowedSliceError {
+impl<TyTag> fmt::Display for BorrowedSliceError<TyTag>
+where
+    TyTag: TrErrTag,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BorrowedSliceError::Empty => {
-                write!(f, "borrowed byte slice is empty")
+            BorrowedSliceError::Empty(tag) => {
+                write!(f, "{}: borrowed byte slice is empty", tag)
             }
         }
     }
 }
 
-impl Error for BorrowedSliceError {}
+impl<TyTag: TrErrTag> Error for BorrowedSliceError<TyTag> {}
+
+impl<TyTag> TrTaggedError<TyTag> for BorrowedSliceError<TyTag>
+where
+    TyTag: TrErrTag,
+{
+    fn err_tag(&self) -> TyTag {
+        match self {
+            BorrowedSliceError::Empty(tag) => *tag,
+        }
+    }
+}
 
 /// A simple immediately-ready `TrMayCancel` future carrying a `SomeOf`.
-struct ReadySegm<S, E>(Option<SomeOf<S, E>>);
+pub struct ReadySegm<S, E>(Option<SomeOf<S, E>>);
 
 impl<S, E> ReadySegm<S, E> {
     fn new(value: SomeOf<S, E>) -> Self {
@@ -59,12 +76,20 @@ impl<S, E> Future for ReadySegm<S, E> {
 }
 
 impl<'f, S: 'f, E: 'f> TrMayCancel<'f> for ReadySegm<S, E> {
+    type MayCancelFuture<'g, C>
+        = ReadySegm<S, E>
+    where
+        Self: 'g,
+        C: TrCancellationToken + Clone,
+        C: 'f,
+        C: 'g,
+        'g: 'f;
     type MayCancelOutput = SomeOf<S, E>;
 
     fn may_cancel_with<'g, C>(
         self,
         _cancel: &'g mut C,
-    ) -> impl IntoFuture<Output = Self::MayCancelOutput>
+    ) -> Self::MayCancelFuture<'g, C>
     where
         Self: 'g,
         'g: 'f,
@@ -212,6 +237,7 @@ impl<T> TrBuffSegmView for BorrowedReadSegm<'_, T>
 where
     T: Borrow<[u8]>,
 {
+    type SlicesIter<'f> = Option<&'f [u8]> where Self: 'f;
     type Item = u8;
 
     #[inline]
@@ -224,7 +250,7 @@ where
         self.remaining().len()
     }
 
-    fn iter_slices(&self) -> impl IntoIterator<Item = &[u8]> {
+    fn iter_slices(&self) -> Self::SlicesIter<'_> {
         let data = self.remaining();
         if data.is_empty() {
             Option::None
@@ -238,15 +264,16 @@ impl<'a, T> TrBuffSegmRef<'a, u8> for BorrowedReadSegm<'a, T>
 where
     T: Borrow<[u8]>,
 {
-    type Reclaimer<'f> = SegmReclaim<'f>
-    where
-        Self: 'f;
+    type Reclaimer<'f> = SegmReclaim<'f> where Self: 'f;
+
+    type TakeSegmRef<'f> = Option<SegmRef<'f, u8, SegmReclaim<'f>>>
+        where Self: 'f;
 
     #[inline]
     fn take_segm_ref<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmRef<'f, u8>> {
+    ) -> Self::TakeSegmRef<'f> {
         BorrowedReadSegm::take_segm_ref(self, demand)
     }
 
@@ -352,6 +379,7 @@ impl<T> TrBuffSegmView for BorrowedWriteSegm<'_, T>
 where
     T: BorrowMut<[u8]>,
 {
+    type SlicesIter<'f> = Option<&'f [MaybeUninit<u8>]> where Self: 'f;
     type Item = MaybeUninit<u8>;
 
     #[inline]
@@ -364,7 +392,7 @@ where
         self.remaining().len()
     }
 
-    fn iter_slices(&self) -> impl IntoIterator<Item = &[MaybeUninit<u8>]> {
+    fn iter_slices(&self) -> Self::SlicesIter<'_> {
         let data = self.remaining();
         if data.is_empty() {
             Option::None
@@ -383,11 +411,16 @@ where
     where
         Self: 'f;
 
+    type TakeSegmMut<'f>
+        = Option<SegmMut<'f, u8, SegmReclaim<'f>>>
+    where
+        Self: 'f;
+
     #[inline]
     fn take_segm_mut<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmMut<'f, u8>> {
+    ) -> Self::TakeSegmMut<'f> {
         BorrowedWriteSegm::take_segm_mut(self, demand)
     }
 
@@ -405,10 +438,13 @@ impl<T> TrBuffRead<u8> for T
 where
     T: Borrow<[u8]>,
 {
-    type SegmRef<'f> = BorrowedReadSegm<'f, T>
+    type ReadAsync<'f> = ReadySegm<Self::SegmRef<'f>, Self::Err>
     where
         Self: 'f;
-    type Err = BorrowedSliceError;
+
+    type SegmRef<'f> = BorrowedReadSegm<'f, T> where Self: 'f;
+
+    type Err = BorrowedSliceError<ReadErrTag>;
 
     #[inline]
     fn is_drained_closing(&self) -> bool {
@@ -418,12 +454,12 @@ where
     fn read_async<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl TrMayCancel<'f, MayCancelOutput = SomeOf<Self::SegmRef<'f>, Self::Err>> {
+    ) -> Self::ReadAsync<'f> {
         let len = Borrow::<[u8]>::borrow(self).len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
-                BorrowedSliceError::Empty,
+                BorrowedSliceError::Empty(ReadErrTag::Closing),
             ));
         }
         let max_len = demand.max().copied();
@@ -445,7 +481,8 @@ where
         let len = Borrow::<[u8]>::borrow(self).len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
-            return SomeOf::new_right(BorrowedSliceError::Empty);
+            let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
+            return SomeOf::new_right(err);
         }
         let max_len = demand.max().copied();
         SomeOf::new_left(BorrowedReadSegm::with_limit(self, max_len))
@@ -456,27 +493,29 @@ impl<T> TrBuffWrite<u8> for T
 where
     T: BorrowMut<[u8]>,
 {
-    type SegmMut<'f>
-        = BorrowedWriteSegm<'f, T>
+    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, Self::Err>
     where
         Self: 'f;
-    type Err = BorrowedSliceError;
+
+    type SegmMut<'f> = BorrowedWriteSegm<'f, T> where Self: 'f;
+
+    type Err = BorrowedSliceError<WriteErrTag>;
 
     #[inline]
-    fn is_blocked_closing(&self) -> bool {
+    fn is_stuffed_closing(&self) -> bool {
         Borrow::<[u8]>::borrow(self).is_empty()
     }
 
     fn write_async<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl TrMayCancel<'f, MayCancelOutput = SomeOf<Self::SegmMut<'f>, Self::Err>>
+    ) -> Self::WriteAsync<'f>
     {
         let len = Borrow::<[u8]>::borrow(self).len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
-                BorrowedSliceError::Empty,
+                BorrowedSliceError::Empty(WriteErrTag::Closing),
             ));
         }
         let max_len = demand.max().copied();
@@ -498,7 +537,8 @@ where
         let len = Borrow::<[u8]>::borrow(self).len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
-            return SomeOf::new_right(BorrowedSliceError::Empty);
+            let err = BorrowedSliceError::Empty(WriteErrTag::Closing);
+            return SomeOf::new_right(err);
         }
         let max_len = demand.max().copied();
         SomeOf::new_left(BorrowedWriteSegm::with_limit(self, max_len))
@@ -513,8 +553,9 @@ mod tests_ {
     fn read_borrowed_slice_advances_like_std() {
         let mut data: &[u8] = b"hello";
 
+        let demand = Demand::less_than(5);
         let mut segm = data
-            .try_read(&Demand::less_than(5))
+            .try_read(&demand)
             .pick_left()
             .expect("read should return a segment");
         let mut child = segm.as_segm_ref();
@@ -533,8 +574,9 @@ mod tests_ {
         let mut storage = [1u8, 2, 3, 4];
         let mut data: &mut [u8] = &mut storage;
 
+        let demand = Demand::less_than(4);
         let mut segm = data
-            .try_read(&Demand::less_than(4))
+            .try_read(&demand)
             .pick_left()
             .expect("read should return a segment");
         let mut child = segm.as_segm_ref();
@@ -552,9 +594,9 @@ mod tests_ {
         let mut storage = [0u8; 5];
         {
             let mut data: &mut [u8] = &mut storage;
-
+            let demand = Demand::less_than(5);
             let mut segm = data
-                .try_write(&Demand::less_than(5))
+                .try_write(&demand)
                 .pick_left()
                 .expect("write should return a segment");
             let mut child = segm.as_segm_mut();

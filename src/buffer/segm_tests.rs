@@ -114,7 +114,7 @@ where
     assert_view_eq(src, expect);
     assert!(dst.len() >= expect.len(), "目标缓冲必须足以容纳全部元素");
     // SAFETY: 测试数据为无需 drop 的简单类型（调用方保证）；
-    let moved = unsafe { TrBuffSegmRef::move_items_to_buff(src, dst) };
+    let moved = src.move_items_to_buff(dst);
     assert_eq!(moved, expect.len(), "搬移数量必须等于期望数量");
     assert_eq!(src.least_count(), 0, "源段必须被全部消费");
     for (i, m) in dst[..moved].iter().enumerate() {
@@ -152,7 +152,7 @@ where
         *m = MaybeUninit::new(expect[i]);
     }
     // SAFETY: 测试数据为无需 drop 的简单类型（调用方保证）；
-    let moved = unsafe { TrBuffSegmMut::move_items_from_buff(dst, src) };
+    let moved = dst.move_items_from_buff(src);
     assert_eq!(moved, expect.len(), "搬移数量必须等于期望数量");
     assert_eq!(
         dst.least_count(),
@@ -167,7 +167,7 @@ mod tests_ {
     use core::{
         error::Error,
         fmt,
-        future::{Future, IntoFuture},
+        future::Future,
         mem::MaybeUninit,
         pin::Pin,
         task::{Context, Poll, Waker},
@@ -177,9 +177,10 @@ mod tests_ {
     use abs_cancel::{NonCancellableToken, TrCancellationToken, TrMayCancel};
     use anylr::SomeOf;
 
-    use super::super::segm_::{SegmMut, SegmReclaim, SegmRef};
     use crate::{
         Demand,
+        buffer::segm_::{SegmMut, SegmReclaim, SegmRef},
+        error::{ReadErrTag, WriteErrTag, TrTaggedError},
         io::{TrInput, TrOutput},
     };
 
@@ -198,6 +199,18 @@ mod tests_ {
     }
 
     impl Error for TestErr {}
+
+    impl TrTaggedError<ReadErrTag> for TestErr {
+        fn err_tag(&self) -> ReadErrTag {
+            ReadErrTag::Unknown
+        }
+    }
+
+    impl TrTaggedError<WriteErrTag> for TestErr {
+        fn err_tag(&self) -> WriteErrTag {
+            WriteErrTag::Unknown
+        }
+    }
 
     /// 一个立即就绪的 `TrMayCancel` future，用于测试 `TrInput` / `TrOutput`
     /// 的简单实现。
@@ -222,12 +235,20 @@ mod tests_ {
     }
 
     impl<'f, S: 'f, E: 'f> TrMayCancel<'f> for ReadySegm<S, E> {
+        type MayCancelFuture<'g, C>
+            = ReadySegm<S, E>
+        where
+            Self: 'g,
+            C: TrCancellationToken + Clone,
+            C: 'f,
+            C: 'g,
+            'g: 'f;
         type MayCancelOutput = SomeOf<S, E>;
 
         fn may_cancel_with<'g, C>(
             self,
             _cancel: &'g mut C,
-        ) -> impl IntoFuture<Output = Self::MayCancelOutput>
+        ) -> Self::MayCancelFuture<'g, C>
         where
             Self: 'g,
             'g: 'f,
@@ -254,12 +275,14 @@ mod tests_ {
     }
 
     impl TrOutput<u8> for TestOutput {
+        type WriteAsync<'f> = ReadySegm<usize, TestErr> where Self: 'f;
+
         type Err = TestErr;
 
-        fn write_async<'a>(
-            &'a mut self,
-            source: &'a [MaybeUninit<u8>],
-        ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
+        fn write_async<'f>(
+            &'f mut self,
+            source: &'f [MaybeUninit<u8>],
+        ) -> Self::WriteAsync<'f>
         {
             let n = source.len();
             for m in source {
@@ -277,12 +300,13 @@ mod tests_ {
     }
 
     impl TrInput<u8> for TestInput {
+        type ReadAsync<'f> = ReadySegm<usize, TestErr> where Self: 'f;
         type Err = TestErr;
 
-        fn read_async<'a>(
-            &'a mut self,
-            target: &'a mut [MaybeUninit<u8>],
-        ) -> impl TrMayCancel<'a, MayCancelOutput = SomeOf<usize, Self::Err>>
+        fn read_async<'f>(
+            &'f mut self,
+            target: &'f mut [MaybeUninit<u8>],
+        ) -> Self::ReadAsync<'f>
         {
             let n = core::cmp::min(target.len(), self.data.len() - self.pos);
             for (i, slot) in target[..n].iter_mut().enumerate() {

@@ -12,11 +12,16 @@ use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
 use gen_mcf_macro::gen_may_cancel_future;
 
-use crate::{Demand, io::{TrInput, TrOutput}};
+use crate::{
+    Demand,
+    buffer::TrAsBufferMut,
+    io::{TrInput, TrOutput},
+};
 
 /// Represent a sequence of slices who are logically the same array but
 /// physically not.
 pub trait TrBuffSegmView {
+    type SlicesIter<'f>: IntoIterator<Item = &'f [Self::Item]> where Self: 'f;
     type Item: Sized;
 
     /// Returns true if no available items to consume, false otherwise.
@@ -29,7 +34,7 @@ pub trait TrBuffSegmView {
     fn least_count(&self) -> usize;
 
     /// Iterate the unconsumed parts of the segment slice by slice.
-    fn iter_slices(&self) -> impl IntoIterator<Item = &[Self::Item]>;
+    fn iter_slices(&self) -> Self::SlicesIter<'_>;
 }
 
 /// An instance to instantly tell the consumer usage of a buffer.
@@ -67,10 +72,14 @@ where
     ///
     /// The amount of the reducing will be the size of taken slice no matter if
     /// the items in it are actually moved or not. No drop. So this may leak.
+    type TakeSegmRef<'f>: Try<Output: TrBuffSegmRef<'f, T>>
+    where
+        Self: 'f;
+
     fn take_segm_ref<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmRef<'f, T>>;
+    ) -> Self::TakeSegmRef<'f>;
 
     /// To end the evaluation of recursive downcast from TrBuffSegmRef.
     /// A `SegmRef<T>` can move items to a `SegmMut<T>`.
@@ -107,17 +116,26 @@ where
     ///
     /// 搬移为位拷贝：被搬出的元素不再由本段 drop，调用方需保证 `T` 无需要
     /// drop 的资源（或由 `dst` 负责）。
-    unsafe fn move_items_to_buff(
+    fn move_items_to_buff(
         &mut self,
         dst: &mut [MaybeUninit<T>],
     ) -> usize {
         let mut c = 0usize;
-        while self.least_count() > 0 && c < dst.len() {
+        let size = dst.len();
+        while self.least_count() > 0 && c < size {
             let mut segm = self.as_segm_ref();
             let dst_buff = &mut dst[c..];
             c += unsafe { segm.move_items_to_buff(dst_buff) };
         }
         c
+    }
+
+    fn move_items_to_as_buff<TyAsBuffMut>(
+        &mut self,
+        dst: &mut TyAsBuffMut,
+    ) -> usize where TyAsBuffMut: TrAsBufferMut<T> {
+        let dst = dst.as_mut_slice_uninit();
+        self.move_items_to_buff(dst)
     }
 }
 
@@ -136,10 +154,14 @@ where
     ///
     /// The amount of the reducing will be the size of taken slice no matter if
     /// the items in it are actually moved or not. No drop. So this may leak.
+    type TakeSegmMut<'f>: Try<Output: TrBuffSegmMut<'f, T>>
+    where
+        Self: 'f;
+
     fn take_segm_mut<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmMut<'f, T>>;
+    ) -> Self::TakeSegmMut<'f>;
 
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>>;
 
@@ -170,7 +192,7 @@ where
     ///
     /// 搬移为位拷贝：`src` 中被搬走的元素在搬移后不再被 drop，调用方需保证
     /// `T` 无需要 drop 的资源（或自行处理 `src` 剩余元素）。
-    unsafe fn move_items_from_buff(
+    fn move_items_from_buff(
         &mut self,
         src: &mut [MaybeUninit<T>],
     ) -> usize {
@@ -181,6 +203,18 @@ where
             c += unsafe { segm.move_items_from_buff(src_buff) };
         }
         c
+    }
+
+    #[inline]
+    fn move_items_from_as_buff<TyAsBuff>(
+        &mut self,
+        src: &mut TyAsBuff,
+    ) -> usize
+    where
+        TyAsBuff: ?Sized + TrAsBufferMut<T>
+    {
+        let src = src.as_mut_slice_uninit();
+        self.move_items_from_buff(src)
     }
 }
 
@@ -603,6 +637,7 @@ impl<'a, T, R> TrBuffSegmView for SegmRef<'a, T, R>
 where
     R: TrReclaim,
 {
+    type SlicesIter<'f> = Option<&'f [T]> where Self: 'f, T: 'f;
     type Item = T;
 
     #[inline]
@@ -616,7 +651,7 @@ where
     }
 
     #[inline]
-    fn iter_slices(&self) -> impl IntoIterator<Item = &[Self::Item]> {
+    fn iter_slices(&self) -> Self::SlicesIter<'_> {
         SegmRef::iter_slices(self)
     }
 }
@@ -630,11 +665,17 @@ where
     where
         Self: 'f;
 
+    type TakeSegmRef<'f>
+        = Option<SegmRef<'f, T, SegmReclaim<'f>>>
+    where
+        Self: 'f,
+        T: 'f;
+
     #[inline]
     fn take_segm_ref<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmRef<'f, T>> {
+    ) -> Self::TakeSegmRef<'f> {
         SegmRef::take_segm_ref(self, demand)
     }
 
@@ -652,6 +693,7 @@ impl<'a, T, R> TrBuffSegmView for SegmMut<'a, T, R>
 where
     R: TrReclaim,
 {
+    type SlicesIter<'f> = Option<&'f [MaybeUninit<T>]> where Self: 'f, T: 'f;
     type Item = MaybeUninit<T>;
 
     #[inline]
@@ -665,7 +707,7 @@ where
     }
 
     #[inline]
-    fn iter_slices(&self) -> impl IntoIterator<Item = &[Self::Item]> {
+    fn iter_slices(&self) -> Self::SlicesIter<'_> {
         SegmMut::iter_slices(self)
     }
 }
@@ -679,11 +721,17 @@ where
     where
         Self: 'f;
 
+    type TakeSegmMut<'f>
+        = Option<SegmMut<'f, T, SegmReclaim<'f>>>
+    where
+        Self: 'f,
+        T: 'f;
+
     #[inline]
     fn take_segm_mut<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> impl Try<Output: TrBuffSegmMut<'f, T>> {
+    ) -> Self::TakeSegmMut<'f> {
         SegmMut::take_segm_mut(self, demand)
     }
 
@@ -731,6 +779,9 @@ where
         };
         let x = output.write_async(source).may_cancel_with(cancel).await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
+            if *cc == 0 {
+                return SomeOf::new_left(c);
+            }
             segm.offset_ += *cc;
             c += cc;
         };
@@ -785,6 +836,9 @@ where
         };
         let x = input.read_async(target).may_cancel_with(cancel).await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
+            if *cc == 0 {
+                return SomeOf::new_left(c);
+            }
             segm.offset_ += *cc;
             c += cc;
         };
