@@ -30,7 +30,6 @@ pub use writer_::{TrBuffTryWrite, TrBuffWrite};
 
 pub mod x_deps {
     pub use abs_cancel;
-    pub use abs_iter;
     pub use anylr;
     pub use funty;
     pub use gen_mcf_macro;
