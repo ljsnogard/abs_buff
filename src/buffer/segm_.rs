@@ -1,16 +1,16 @@
 use core::{
     borrow::BorrowMut,
     cmp,
-    marker::PhantomPinned,
     mem::MaybeUninit,
     ops::Try,
     pin::Pin,
-    ptr, slice,
+    ptr,
+    slice,
 };
 
 use abs_cancel::{TrCancellationToken, TrMayCancel};
 use anylr::SomeOf;
-use gen_mcf_macro::gen_may_cancel_future;
+use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
     Demand,
@@ -261,7 +261,7 @@ where
     buffer_: &'a [T],
     offset_: usize,
     reclaim_: Option<R>,
-    _pinned_: PhantomPinned,
+    _pinned_: core::marker::PhantomPinned,
 }
 
 pub struct SegmMut<'a, T, R>
@@ -271,7 +271,7 @@ where
     buffer_: &'a mut [MaybeUninit<T>],
     offset_: usize,
     reclaim_: Option<R>,
-    _pinned_: PhantomPinned,
+    _pinned_: core::marker::PhantomPinned,
 }
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -290,7 +290,7 @@ where
             buffer_: buffer,
             offset_: 0usize,
             reclaim_: Option::Some(reclaim),
-            _pinned_: PhantomPinned,
+            _pinned_: core::marker::PhantomPinned,
         }
     }
 
@@ -351,11 +351,11 @@ where
         &'f mut self,
         output: &'f mut TyOutput,
         demand: &'f Demand<usize>,
-    ) -> SegmRefOutputAsync<'a, 'f, T, R, TyOutput>
+    ) -> SegmRefOutputAsync<'a, 'f, 'f, T, R, TyOutput>
     where
         TyOutput: TrOutput<T>,
     {
-        SegmRefOutputAsync(self, output, demand)
+        SegmRefOutputAsync::new(self, output, demand)
     }
 
     /// Do a memory copy to the target buffer. And the items that are being
@@ -460,7 +460,7 @@ where
             buffer_: buffer,
             offset_: 0usize,
             reclaim_: Option::Some(reclaim),
-            _pinned_: PhantomPinned,
+            _pinned_: core::marker::PhantomPinned,
         }
     }
 
@@ -531,11 +531,11 @@ where
         &'f mut self,
         input: &'f mut TyInput,
         demand: &'f Demand<usize>,
-    ) -> SegmMutInputAsync<'a, 'f, T, R, TyInput>
+    ) -> SegmMutInputAsync<'a, 'f, 'f, T, R, TyInput>
     where
         TyInput: TrInput<T>,
     {
-        SegmMutInputAsync(self, input, demand)
+        SegmMutInputAsync::new(self, input, demand)
     }
 
     /// Do a memory copy to the target buffer. And the items that are being
@@ -716,13 +716,11 @@ impl<'a, T, R> TrBuffSegmMut<'a, T> for SegmMut<'a, T, R>
 where
     R: TrReclaim,
 {
-    type Reclaimer<'f>
-        = SegmReclaim<'f>
+    type Reclaimer<'f> = SegmReclaim<'f>
     where
         Self: 'f;
 
-    type TakeSegmMut<'f>
-        = Option<SegmMut<'f, T, SegmReclaim<'f>>>
+    type TakeSegmMut<'f> = Option<SegmMut<'f, T, SegmReclaim<'f>>>
     where
         Self: 'f,
         T: 'f;
@@ -741,18 +739,18 @@ where
     }
 }
 
-#[gen_may_cancel_future(SegmRefOutput)]
+#[gen_may_cancel_future(SegmRefOutput, pub)]
 async fn segm_ref_output_async_<'a, 'f, TyData, TyRecl, TyOut, TyTok>(
     segm: &'f mut SegmRef<'a, TyData, TyRecl>,
     output: &'f mut TyOut,
     demand: &'f Demand<usize>,
-    cancel: &'f mut TyTok,
+    cancel: TyTok,
 ) -> SomeOf<usize, <TyOut as TrOutput<TyData>>::Err>
 where
     'a: 'f,
     TyRecl: TrReclaim,
     TyOut: TrOutput<TyData>,
-    TyTok: TrCancellationToken + Clone,
+    TyTok: TrCancellationToken,
 {
     let buff = &segm.buffer_[segm.offset_..];
     let size = buff.len();
@@ -777,7 +775,10 @@ where
             let p = buff.as_ptr() as *const _ as *const MaybeUninit<TyData>;
             unsafe { slice::from_raw_parts(p, take) }
         };
-        let x = output.write_async(source).may_cancel_with(cancel).await;
+        let x = output
+            .write_async(source)
+            .may_cancel_with(cancel.child_token())
+            .await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
             if *cc == 0 {
                 return SomeOf::new_left(c);
@@ -798,18 +799,18 @@ where
     SomeOf::new_left(c)
 }
 
-#[gen_may_cancel_future(SegmMutInput)]
+#[gen_may_cancel_future(SegmMutInput, pub)]
 async fn segm_mut_input_async_<'a, 'f, TyData, TyRecl, TyInput, TyTok>(
     segm: &'f mut SegmMut<'a, TyData, TyRecl>,
     input: &'f mut TyInput,
     demand: &'f Demand<usize>,
-    cancel: &'f mut TyTok,
+    cancel: TyTok,
 ) -> SomeOf<usize, <TyInput as TrInput<TyData>>::Err>
 where
     'a: 'f,
     TyRecl: TrReclaim,
     TyInput: TrInput<TyData>,
-    TyTok: TrCancellationToken + Clone,
+    TyTok: TrCancellationToken,
 {
     let buff = &mut segm.buffer_[segm.offset_..];
     let size = buff.len();
@@ -834,7 +835,10 @@ where
             let p = buff.as_mut_ptr();
             unsafe { slice::from_raw_parts_mut(p, take) }
         };
-        let x = input.read_async(target).may_cancel_with(cancel).await;
+        let x = input
+            .read_async(target)
+            .may_cancel_with(cancel.child_token())
+            .await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
             if *cc == 0 {
                 return SomeOf::new_left(c);

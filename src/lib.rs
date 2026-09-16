@@ -10,7 +10,7 @@
 #[cfg(test)]
 extern crate std;
 
-pub use gen_mcf_macro::gen_may_cancel_future;
+pub use gen_mcf2::gen_may_cancel_future;
 
 pub mod buffer;
 pub mod error;
@@ -32,5 +32,5 @@ pub mod x_deps {
     pub use abs_cancel;
     pub use anylr;
     pub use funty;
-    pub use gen_mcf_macro;
+    pub use gen_mcf2;
 }

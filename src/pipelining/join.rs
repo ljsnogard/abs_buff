@@ -1,7 +1,7 @@
 use core::{marker::PhantomData, mem};
 
 use abs_cancel::{TrCancellationToken, TrMayCancel};
-use gen_mcf_macro::gen_may_cancel_future;
+use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
     Demand, TrBuffRead, TrBuffWrite,
@@ -52,29 +52,27 @@ where
         }
     }
 
-    pub fn pipe_async<'f>(&'f mut self) -> PipeIoAsync<'f, W, R, T> {
-        PipeIoAsync(&PhantomData, self.buff_w_, self.buff_r_)
+    pub fn pipe_async<'f>(&'f mut self) -> PipeIoAsync<'f, 'f, W, R, T> {
+        PipeIoAsync::new(self.buff_w_, self.buff_r_)
     }
 }
 
-#[gen_may_cancel_future(PipeIo)]
+#[gen_may_cancel_future(PipeIo, pub)]
 async fn pipe_async_<'f, W, R, T, C>(
-    _no_t_: &'f PhantomData<T>, // This is a work-around for macro gen_may_cancel_future.
     buff_w: &'f mut W,
     buff_r: &'f mut R,
-    cancel: &'f mut C,
+    cancel: C,
 ) -> PipeJoinIoResult<W, R, T>
 where
     W: TrBuffWrite<T>,
     R: TrBuffRead<T>,
-    C: TrCancellationToken + Clone,
+    T: 'f,
+    C: TrCancellationToken,
 {
     if mem::size_of::<T>() == 0 {
         return PipeJoinIoResult::NoOps;
     }
     let mut c = 0usize;
-    let mut tx_cancel = cancel.clone();
-    let mut rx_cancel = cancel.clone();
     loop {
         if c == usize::MAX {
             return PipeJoinIoResult::SizeLimit(c);
@@ -88,7 +86,7 @@ where
         let r_demand = Demand::less_than(usize::MAX - c);
         let mut r_res = buff_r
             .read_async(&r_demand)
-            .may_cancel_with(&mut rx_cancel)
+            .may_cancel_with(cancel.child_token())
             .await;
 
         if let Option::Some(rx_segm) = r_res.as_mut().pick_left() {
@@ -104,7 +102,7 @@ where
                 let w_demand = Demand::less_than(rx_buf_capacity);
                 let mut w_res = buff_w
                     .write_async(&w_demand)
-                    .may_cancel_with(&mut tx_cancel)
+                    .may_cancel_with(cancel.child_token())
                     .await;
 
                 if let Option::Some(tx_segm) = w_res.as_mut().pick_left() {
@@ -216,25 +214,22 @@ mod tests_ {
         }
     }
 
-    impl<'f, S: 'f, E: 'f> TrMayCancel<'f> for ReadySegm<S, E> {
-        type MayCancelFuture<'g, C>
-            = ReadySegm<S, E>
+    impl<'a, S, E> TrMayCancel<'a> for ReadySegm<S, E>
+    where
+        S: 'a,
+        E: 'a,
+    {
+        type MayCancelFuture<'f, C> = ReadySegm<S, E>
         where
-            Self: 'g,
-            C: TrCancellationToken + Clone,
-            C: 'f,
-            C: 'g,
-            'g: 'f;
+            'f: 'a,
+            Self: 'f,
+            C: 'f + TrCancellationToken;
+
         type MayCancelOutput = SomeOf<S, E>;
 
-        fn may_cancel_with<'g, C>(
-            self,
-            _cancel: &'g mut C,
-        ) -> Self::MayCancelFuture<'g, C>
+        fn may_cancel_with<C>(self, _: C) -> Self::MayCancelFuture<'a, C>
         where
-            Self: 'g,
-            'g: 'f,
-            C: TrCancellationToken + Clone,
+            C: 'a + TrCancellationToken,
         {
             self
         }

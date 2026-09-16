@@ -13,6 +13,7 @@ pub use as_buff_::{TrAsBuffer, TrAsBufferMut};
 pub use buff_::{TrBuffer, TrBufferMut, TrMaybeUninit};
 pub use state_::TrBufferState;
 pub use segm_::{
-    SegmMut, SegmReclaim, SegmRef, TrBuffSegmMut, TrBuffSegmRef,
-    TrBuffSegmView, TrReclaim,
+    SegmMut, SegmReclaim, SegmRef,
+    SegmRefOutputAsync, SegmMutInputAsync,
+    TrBuffSegmMut, TrBuffSegmRef, TrBuffSegmView, TrReclaim,
 };

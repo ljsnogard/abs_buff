@@ -75,25 +75,22 @@ impl<S, E> Future for ReadySegm<S, E> {
     }
 }
 
-impl<'f, S: 'f, E: 'f> TrMayCancel<'f> for ReadySegm<S, E> {
-    type MayCancelFuture<'g, C>
-        = ReadySegm<S, E>
+impl<'a, S, E> TrMayCancel<'a> for ReadySegm<S, E>
+where
+    S: 'a,
+    E: 'a,
+{
+    type MayCancelFuture<'f, C> = ReadySegm<S, E>
     where
-        Self: 'g,
-        C: TrCancellationToken + Clone,
-        C: 'f,
-        C: 'g,
-        'g: 'f;
+        'f: 'a,
+        Self: 'f,
+        C: 'f + TrCancellationToken;
+
     type MayCancelOutput = SomeOf<S, E>;
 
-    fn may_cancel_with<'g, C>(
-        self,
-        _cancel: &'g mut C,
-    ) -> Self::MayCancelFuture<'g, C>
+    fn may_cancel_with<C>(self, _: C) -> Self::MayCancelFuture<'a, C>
     where
-        Self: 'g,
-        'g: 'f,
-        C: TrCancellationToken + Clone,
+        C: 'a + TrCancellationToken,
     {
         self
     }

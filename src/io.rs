@@ -140,23 +140,16 @@ where
     T: 'a,
 {
     type MayCancelOutput = <Self as IntoFuture>::Output;
+
     type MayCancelFuture<'f, C> = <Self as IntoFuture>::IntoFuture
     where
-        Self: 'f,
-        C: abs_cancel::TrCancellationToken + Clone,
-        C: 'f,
-        'f: 'a;
-
-    fn may_cancel_with<'f, C>(
-        self,
-        _: &'f mut C,
-    ) -> Self::MayCancelFuture<'f, C>
-    where
-        Self: 'f,
-        C: abs_cancel::TrCancellationToken + Clone,
-        C: 'a,
-        C: 'f,
         'f: 'a,
+        Self: 'f,
+        C: 'a + abs_cancel::TrCancellationToken,;
+
+    fn may_cancel_with<C>(self, _: C) -> Self::MayCancelFuture<'a, C>
+    where
+        C: 'a + abs_cancel::TrCancellationToken,
     {
         future::ready(SomeOf::new_right(BlackholeIoError))
     }
