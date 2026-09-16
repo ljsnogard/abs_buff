@@ -16,8 +16,13 @@ gen_mcf2 = { git = "https://gitee.com/lino_snsalias/gen_mcf2.rs.git" }
 
 funty = { version = "3.0.0-rc2", default-features = false }
 
-[features]
-segm-tests = []
-
 [dev-dependencies]
+# 测试支撑（共享设备 + 泛型断言函数）。dev-dependencies 不会被下游消费，
+# 因此这里用 path 指向同级仓库，便于本地联调。
+abs_buff-testkit = { path = "../abs_buff-testkit" }
 compio = { version = "0.19.*", features = ["fs", "macros", "time"] }
+
+# 本 crate 测试自己要跑 `abs_buff-testkit`，而后者以 git 依赖引用 `abs_buff`；
+# 这里把它 patch 回本仓库自身，保证测试用的是**本地**这份 abs_buff。
+[patch."https://gitee.com/lino_snsalias/abs_buff.git"]
+abs_buff = { path = "." }

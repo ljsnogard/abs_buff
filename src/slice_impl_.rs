@@ -57,11 +57,30 @@ where
     }
 }
 
-/// A simple immediately-ready `TrMayCancel` future carrying a `SomeOf`.
+/// 一个「立即就绪」的 future，产出 [`SomeOf<S, E>`]。
+///
+/// 本类型既服务于本 crate 的切片实现（`TrInput` / `TrOutput` 的异步方法直接
+/// 返回它），也作为**公开工具**提供给下游实现者：任何自定义 `TrInput` /
+/// `TrOutput` 都可以在同步就绪的场合把它当作 `ReadAsync<'f>` /
+/// `WriteAsync<'f>` 的具体类型，而不必自己再写一个 `Future`。
+///
+/// # Panics
+///
+/// [`Future::poll`] 在同一个实例上第二次被调用时会 panic：它只承载「一次就绪
+/// 结果」，被 poll 一次后内部值已被取走。正常使用（`await` 一次）不会触发。
 pub struct ReadySegm<S, E>(Option<SomeOf<S, E>>);
 
 impl<S, E> ReadySegm<S, E> {
-    fn new(value: SomeOf<S, E>) -> Self {
+    /// 用一个已经就绪的结果构造本 future。
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use abs_buff::{ReadySegm, x_deps::anylr::SomeOf};
+    ///
+    /// let ready: ReadySegm<usize, ()> = ReadySegm::new(SomeOf::new_left(3usize));
+    /// ```
+    pub fn new(value: SomeOf<S, E>) -> Self {
         ReadySegm(Option::Some(value))
     }
 }
