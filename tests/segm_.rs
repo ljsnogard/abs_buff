@@ -13,14 +13,7 @@ use abs_buff::{
     Demand,
     buffer::{SegmMut, SegmReclaim, SegmRef},
 };
-use abs_buff_testkit::{TestInput, TestOutput};
-
-/// 把 `dst`（`MaybeUninit` 数组）里已初始化的内容读出来。
-fn read_init<T: Copy>(dst: &[MaybeUninit<T>]) -> Vec<T> {
-    dst.iter()
-        .map(|m| unsafe { m.assume_init_read() })
-        .collect()
-}
+use abs_buff_testkit::{TestInput, TestOutput, read_initialized};
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 // 泛型段测试：move_items_* 的 trait 默认实现（SegmRef / SegmMut）
@@ -62,7 +55,7 @@ fn segm_move_items_trait_defaults() {
         // 底层存储与回收计数（段 drop 时提交消费量）；
         drop(src);
         drop(dst);
-        assert_eq!(read_init(&dst_data), expect, "内容必须按序搬入目标");
+        assert_eq!(read_initialized(&dst_data, dst_data.len()), expect, "内容必须按序搬入目标");
         assert_eq!(src_consumed, 16, "源段必须按消费量提交");
         assert_eq!(dst_consumed, 16, "目标段必须按消费量提交");
     }
@@ -87,7 +80,7 @@ fn segm_move_items_trait_defaults() {
         assert_eq!(moved, 16);
         drop(src);
         drop(dst);
-        assert_eq!(read_init(&dst_data), expect, "内容必须按序搬入目标");
+        assert_eq!(read_initialized(&dst_data, dst_data.len()), expect, "内容必须按序搬入目标");
         assert_eq!(src_consumed, 16);
         assert_eq!(dst_consumed, 16);
     }
@@ -108,7 +101,7 @@ fn segm_move_items_trait_defaults() {
         };
         assert_eq!(moved, 16);
         drop(src);
-        assert_eq!(read_init(&dst_buf), expect, "缓冲内容必须按序");
+        assert_eq!(read_initialized(&dst_buf, dst_buf.len()), expect, "缓冲内容必须按序");
         assert_eq!(consumed, 16);
     }
 
@@ -128,7 +121,7 @@ fn segm_move_items_trait_defaults() {
         };
         assert_eq!(moved, 16);
         drop(dst);
-        assert_eq!(read_init(&dst_data), expect, "目标段内容必须按序");
+        assert_eq!(read_initialized(&dst_data, dst_data.len()), expect, "目标段内容必须按序");
         assert_eq!(consumed, 16);
     }
 }
