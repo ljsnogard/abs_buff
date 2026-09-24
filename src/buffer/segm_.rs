@@ -446,6 +446,25 @@ where
         let child = SegmRef::new(dst, reclaim);
         Option::Some(child)
     }
+
+    /// Take a slice of the internal buffer lend it to a instance that will
+    /// report how many units it actually consumes when drop.
+    pub fn take_slice_ref<'f, F, S>(
+        &'f mut self,
+        length: usize,
+        factory: F,
+    ) -> Option<S>
+    where
+        F: FnOnce(&'f [T], SegmReclaim<'f>) -> S,
+        S: 'f,
+    {
+        if length >= self.least_count() {
+            return Option::None;
+        }
+        let buf = &self.buffer_[self.offset_..self.offset_ + length];
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
+        Option::Some(factory(buf, reclaim))
+    }
 }
 
 impl<'a, T, R> SegmMut<'a, T, R>
@@ -598,6 +617,25 @@ where
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         let child = SegmMut::new(dst, reclaim);
         Option::Some(child)
+    }
+
+    /// Take a slice of the internal buffer lend it to a instance that will
+    /// report how many units it actually consumes when drop.
+    pub fn take_slice_mut<'f, F, S>(
+        &'f mut self,
+        length: usize,
+        factory: F,
+    ) -> Option<S>
+    where
+        F: FnOnce(&'f mut [MaybeUninit<T>], SegmReclaim<'f>) -> S,
+        S: 'f,
+    {
+        if length >= self.least_count() {
+            return Option::None;
+        }
+        let buf = &mut self.buffer_[self.offset_..self.offset_ + length];
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
+        Option::Some(factory(buf, reclaim))
     }
 }
 
