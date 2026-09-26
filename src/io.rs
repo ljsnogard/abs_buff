@@ -76,7 +76,13 @@ pub trait TrOutput<T = u8> {
     }
 }
 
-impl<T> TrOutput<T> for () {
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Blackhole;
+
+impl crate::buffer::TrProducerState for Blackhole {}
+impl crate::buffer::TrConsumerState for Blackhole {}
+
+impl<T> TrOutput<T> for Blackhole {
     type WriteAsync<'f> = BlackholeIoAsync<'f, T>
     where
         Self: 'f,
@@ -88,7 +94,7 @@ impl<T> TrOutput<T> for () {
     }
 }
 
-impl<T> TrInput<T> for () {
+impl<T> TrInput<T> for Blackhole {
     type ReadAsync<'f> = BlackholeIoAsync<'f, T>
     where
         Self: 'f,

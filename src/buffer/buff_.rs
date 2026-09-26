@@ -5,19 +5,12 @@ use core::{
 
 use crate::buffer::{TrAsBuffer, TrAsBufferMut};
 
-mod sealed_maybe_uninit_ {
-    pub trait TrSealedMaybeUninit {}
-}
-
 /// A trait specifically abstracted from `MaybeUninit<T>` or types alike.
 ///
 /// # Safety
 /// The only reasonable implementation is core::mem::MaybeUninit<T>, which is
 /// already included in this crate.
-pub unsafe trait TrMaybeUninit
-where
-    Self: sealed_maybe_uninit_::TrSealedMaybeUninit,
-{
+pub impl(crate) unsafe trait TrMaybeUninit {
     type Inner: Sized;
 
     /// See [core::mem::MaybeUninit::uninit]
@@ -194,8 +187,6 @@ impl<T> TrAsBufferMut<T> for &mut [MaybeUninit<T>] {
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 // impl TrMaybeUninit for `MaybeUninit<T>`
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T> sealed_maybe_uninit_::TrSealedMaybeUninit for MaybeUninit<T> {}
 
 unsafe impl<T> TrMaybeUninit for MaybeUninit<T> {
     type Inner = T;

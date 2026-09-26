@@ -13,9 +13,7 @@ use anylr::SomeOf;
 use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
-    Demand,
-    buffer::TrAsBufferMut,
-    io::{TrInput, TrOutput},
+    Demand, buffer::{TrAsBufferMut, TrMaybeUninit}, io::{TrInput, TrOutput},
 };
 
 /// Represent a sequence of slices who are logically the same array but
@@ -142,11 +140,9 @@ where
 /// A buffer that its data is organized with one or more slices mut.
 pub trait TrBuffSegmMut<'a, T>
 where
-    Self: TrBuffSegmView<Item = MaybeUninit<T>>,
+    Self: TrBuffSegmView<Item: TrMaybeUninit<Inner = T>>,
 {
-    type Reclaimer<'f>: TrReclaim
-    where
-        Self: 'f;
+    type Reclaimer<'f>: TrReclaim where Self: 'f;
 
     /// Take a slice starting from the beginning of the unconsumed part, length
     /// suggested by the demand argument. Will reduce the length of the segment
@@ -154,14 +150,9 @@ where
     ///
     /// The amount of the reducing will be the size of taken slice no matter if
     /// the items in it are actually moved or not. No drop. So this may leak.
-    type TakeSegmMut<'f>: Try<Output: TrBuffSegmMut<'f, T>>
-    where
-        Self: 'f;
+    type TakeSegmMut<'f>: Try<Output: TrBuffSegmMut<'f, T>> where Self: 'f;
 
-    fn take_segm_mut<'f>(
-        &'f mut self,
-        demand: &Demand<usize>,
-    ) -> Self::TakeSegmMut<'f>;
+    fn take_segm_mut<'f>(&'f mut self, demand: &Demand<usize>) -> Self::TakeSegmMut<'f>;
 
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>>;
 

@@ -6,7 +6,7 @@ mod segm_;
 
 pub use as_buff_::{TrAsBuffer, TrAsBufferMut};
 pub use buff_::{TrBuffer, TrBufferMut, TrMaybeUninit};
-pub use state_::TrBufferState;
+pub use state_::{TrConsumerState, TrProducerState};
 pub use segm_::{
     SegmMut, SegmReclaim, SegmRef,
     SegmRefOutputAsync, SegmMutInputAsync,

@@ -3,30 +3,33 @@ use anylr::SomeOf;
 
 use crate::{
     Demand,
-    buffer::TrBuffSegmRef,
+    buffer::{TrConsumerState, TrBuffSegmRef},
     error::{ReadErrTag, TrTaggedError},
 };
+
+pub trait TrBuffTryRead<T = u8> {
+    type SegmRef<'f>: TrBuffSegmRef<'f, T> where Self: 'f;
+
+    type Err: TrTaggedError<ReadErrTag>;
+
+    fn try_read<'f>(
+        &'f mut self,
+        demand: &'f Demand<usize>,
+    ) -> SomeOf<Self::SegmRef<'f>, Self::Err>;
+}
 
 /// A kind of buffer that owns the memory for reading data by lending some
 /// segments to the consumer.
 ///
 /// This design is to keep compatible with `io_uring` and polling model.
-pub trait TrBuffRead<T = u8> {
+pub trait TrBuffRead<T = u8>
+where
+    Self: TrBuffTryRead<T>,
+{
     type ReadAsync<'f>: TrMayCancel<'f, MayCancelOutput =
         SomeOf<Self::SegmRef<'f>, Self::Err>>
     where
         Self: 'f;
-
-    type SegmRef<'f>: TrBuffSegmRef<'f, T> where Self: 'f;
-
-    type Err: TrTaggedError<ReadErrTag>;
-
-    /// Indicates whether this buff will no longer emits any data. This is
-    /// equivalent of `ReadErrTag::Closing`.
-    ///
-    /// This function lets the user knows when to stop consuming loop regardless
-    /// any knowledge of the error type.
-    fn is_drained_closing(&self) -> bool;
 
     /// Emits borrowed segment which carries the buffered items. The amount of items
     /// can be specified by the parameter `demand`.
@@ -34,11 +37,4 @@ pub trait TrBuffRead<T = u8> {
         &'f mut self,
         demand: &'f Demand<usize>,
     ) -> Self::ReadAsync<'f>;
-}
-
-pub trait TrBuffTryRead<T = u8>: TrBuffRead<T> {
-    fn try_read<'f>(
-        &'f mut self,
-        demand: &'f Demand<usize>,
-    ) -> SomeOf<Self::SegmRef<'f>, Self::Err>;
 }

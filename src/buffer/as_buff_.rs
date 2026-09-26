@@ -13,7 +13,6 @@ where
     fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>];
 }
 
-
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 // impl TrBuffer TrBufferMut for `[MaybeUninit<T>; N]`, array of maybe uninit
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----

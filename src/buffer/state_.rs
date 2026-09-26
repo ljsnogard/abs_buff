@@ -1,12 +1,15 @@
-/// Ob
-pub trait TrBufferState {
-    fn capacity(&self) -> usize;
+pub trait TrConsumerState {
+    /// Tell how many units can be read and indicate whether the producer
+    /// end is closed.
+    fn consumer_state(&self) -> Option<(usize, bool)> {
+        Option::None
+    }
+}
 
-    fn data_size(&self) -> usize;
-
-    fn free_size(&self) -> usize;
-
-    fn is_producer_closed(&self) -> bool;
-
-    fn is_consumer_closed(&self) -> bool;
+pub trait TrProducerState {
+    /// Tell how many units can be written into and indicate whether the
+    /// consumer end is closed.
+    fn producer_state(&self) -> Option<(usize, bool)> {
+        Option::None
+    }
 }

@@ -1,5 +1,4 @@
 use core::{
-    borrow::{Borrow, BorrowMut},
     error::Error,
     fmt,
     future::Future,
@@ -18,6 +17,7 @@ use crate::{
     buffer::{
         SegmMut, SegmReclaim, SegmRef,
         TrBuffSegmMut, TrBuffSegmRef, TrBuffSegmView,
+        TrConsumerState, TrProducerState,
     },
     error::{ReadErrTag, TrErrTag, TrTaggedError, WriteErrTag},
 };
@@ -128,21 +128,14 @@ trait TrReadAdvance {
     fn advance_slice(&mut self, amount: usize);
 }
 
-impl<T> TrReadAdvance for T
-where
-    T: Borrow<[u8]>,
-{
-    default fn advance_slice(&mut self, _amount: usize) {}
-}
-
-impl TrReadAdvance for &[u8] {
+impl<T> TrReadAdvance for &[T] {
     fn advance_slice(&mut self, amount: usize) {
         let old = *self;
         *self = &old[amount..];
     }
 }
 
-impl TrReadAdvance for &mut [u8] {
+impl<T> TrReadAdvance for &mut [T] {
     fn advance_slice(&mut self, amount: usize) {
         let old = core::mem::take(self);
         *self = &mut old[amount..];
@@ -153,108 +146,85 @@ trait TrWriteAdvance {
     fn advance_slice(&mut self, amount: usize);
 }
 
-impl<T> TrWriteAdvance for T
-where
-    T: BorrowMut<[u8]>,
-{
-    default fn advance_slice(&mut self, _amount: usize) {}
-}
-
-impl TrWriteAdvance for &mut [u8] {
+impl<T> TrWriteAdvance for &mut [T] {
     fn advance_slice(&mut self, amount: usize) {
         let old = core::mem::take(self);
         *self = &mut old[amount..];
     }
 }
 
-fn advance_read<T>(src: &mut T, amount: usize)
-where
-    T: Borrow<[u8]>,
-{
-    TrReadAdvance::advance_slice(src, amount);
+fn advance_read<T>(mut src: &[T], amount: usize) {
+    TrReadAdvance::advance_slice(&mut src, amount);
 }
 
-fn advance_write<T>(dst: &mut T, amount: usize)
-where
-    T: BorrowMut<[u8]>,
-{
-    TrWriteAdvance::advance_slice(dst, amount);
+fn advance_write<T>(mut dst: &mut [T], amount: usize) {
+    TrWriteAdvance::advance_slice(&mut dst, amount);
 }
 
 // ---------------------------------------------------------------------------
 // Read segment over a `T: Borrow<[u8]>`
 // ---------------------------------------------------------------------------
 
-pub struct BorrowedReadSegm<'a, T>
-where
-    T: Borrow<[u8]>,
-{
-    src: &'a mut T,
-    offset: usize,
-    end: usize,
-    _pinned: PhantomPinned,
+pub struct BorrowedReadSegm<'a, T> {
+    source_: &'a [T],
+    offset_: usize,
+    end_: usize,
+    _pinned_: PhantomPinned,
 }
 
-impl<'a, T> BorrowedReadSegm<'a, T>
-where
-    T: Borrow<[u8]>,
-{
-    fn with_limit(src: &'a mut T, max: Option<usize>) -> Self {
-        let len = Borrow::<[u8]>::borrow(&*src).len();
-        let end = match max {
+impl<'a, T> BorrowedReadSegm<'a, T> {
+    fn with_limit(source: &'a [T], max: Option<usize>) -> Self {
+        let len = source.len();
+        let end_ = match max {
             Option::Some(m) if m < len => m,
             _ => len,
         };
         BorrowedReadSegm {
-            src,
-            offset: 0,
-            end,
-            _pinned: PhantomPinned,
+            source_: source,
+            offset_: 0,
+            end_,
+            _pinned_: PhantomPinned,
         }
     }
 
-    fn remaining(&self) -> &[u8] {
-        &Borrow::<[u8]>::borrow(&*self.src)[self.offset..self.end]
+    fn remaining(&self) -> &[T] {
+        &self.source_[self.offset_..self.end_]
     }
 
-    fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, u8, SegmReclaim<'f>> {
-        let data = &Borrow::<[u8]>::borrow(&*self.src)[self.offset..self.end];
-        SegmRef::new(data, SegmReclaim::new(Pin::new(&mut self.offset)))
+    fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, SegmReclaim<'f>> {
+        let data = &self.source_[self.offset_..self.end_];
+        SegmRef::new(
+            data,
+            SegmReclaim::new(Pin::new(&mut self.offset_))
+        )
     }
 
     fn take_segm_ref<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> Option<SegmRef<'f, u8, SegmReclaim<'f>>> {
-        let c = self.end - self.offset;
+    ) -> Option<SegmRef<'f, T, SegmReclaim<'f>>> {
+        let c = self.end_ - self.offset_;
         if c == 0 {
             return Option::None;
         }
         let available = Demand::less_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = *agreement.max()?;
-        let data = &Borrow::<[u8]>::borrow(&*self.src)
-            [self.offset..self.offset + max_len];
-        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset));
+        let data = &self.source_[self.offset_..self.offset_ + max_len];
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(SegmRef::new(data, reclaim))
     }
 }
 
-impl<T> Drop for BorrowedReadSegm<'_, T>
-where
-    T: Borrow<[u8]>,
-{
+impl<T> Drop for BorrowedReadSegm<'_, T> {
     fn drop(&mut self) {
-        advance_read(&mut *self.src, self.offset);
+        advance_read(self.source_, self.offset_);
     }
 }
 
-impl<T> TrBuffSegmView for BorrowedReadSegm<'_, T>
-where
-    T: Borrow<[u8]>,
-{
-    type SlicesIter<'f> = Option<&'f [u8]> where Self: 'f;
-    type Item = u8;
+impl<T> TrBuffSegmView for BorrowedReadSegm<'_, T> {
+    type SlicesIter<'f> = Option<&'f [T]> where Self: 'f;
+    type Item = T;
 
     #[inline]
     fn is_empty(&self) -> bool {
@@ -276,13 +246,10 @@ where
     }
 }
 
-impl<'a, T> TrBuffSegmRef<'a, u8> for BorrowedReadSegm<'a, T>
-where
-    T: Borrow<[u8]>,
-{
+impl<'a, T> TrBuffSegmRef<'a, T> for BorrowedReadSegm<'a, T> {
     type Reclaimer<'f> = SegmReclaim<'f> where Self: 'f;
 
-    type TakeSegmRef<'f> = Option<SegmRef<'f, u8, SegmReclaim<'f>>>
+    type TakeSegmRef<'f> = Option<SegmRef<'f, T, SegmReclaim<'f>>>
         where Self: 'f;
 
     #[inline]
@@ -294,109 +261,95 @@ where
     }
 
     #[inline]
-    fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, u8, Self::Reclaimer<'f>> {
+    fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, Self::Reclaimer<'f>> {
         BorrowedReadSegm::as_segm_ref(self)
     }
 }
 
 // ---------------------------------------------------------------------------
-// Write segment over a `T: BorrowMut<[u8]>`
+// Write segment over a `&mut [T]`
 // ---------------------------------------------------------------------------
 
-pub struct BorrowedWriteSegm<'a, T>
-where
-    T: BorrowMut<[u8]>,
-{
-    dst: &'a mut T,
-    offset: usize,
-    end: usize,
+pub struct BorrowedWriteSegm<'a, T> {
+    target_: &'a mut [T],
+    offset_: usize,
+    end_: usize,
     _pinned: PhantomPinned,
 }
 
-impl<'a, T> BorrowedWriteSegm<'a, T>
-where
-    T: BorrowMut<[u8]>,
-{
-    fn with_limit(dst: &'a mut T, max: Option<usize>) -> Self {
-        let len = Borrow::<[u8]>::borrow(&*dst).len();
-        let end = match max {
+impl<'a, T> BorrowedWriteSegm<'a, T> {
+    fn with_limit(target: &'a mut [T], max: Option<usize>) -> Self {
+        let len = target.len();
+        let end_ = match max {
             Option::Some(m) if m < len => m,
             _ => len,
         };
         BorrowedWriteSegm {
-            dst,
-            offset: 0,
-            end,
+            target_: target,
+            offset_: 0,
+            end_,
             _pinned: PhantomPinned,
         }
     }
 
-    fn remaining(&self) -> &[MaybeUninit<u8>] {
-        let bytes = &Borrow::<[u8]>::borrow(&*self.dst)[self.offset..self.end];
-        // SAFETY: `MaybeUninit<u8>` has the same layout as `u8`, and the
+    fn remaining(&self) -> &[MaybeUninit<T>] {
+        let bytes = &self.target_[self.offset_..self.end_];
+        // SAFETY: `MaybeUninit<T>` has the same layout as `T`, and the
         // slice lifetime is tied to the underlying borrowed bytes.
         unsafe {
             slice::from_raw_parts(
-                bytes.as_ptr().cast::<MaybeUninit<u8>>(),
+                bytes.as_ptr().cast::<MaybeUninit<T>>(),
                 bytes.len(),
             )
         }
     }
 
-    fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, u8, SegmReclaim<'f>> {
-        let bytes = &mut BorrowMut::<[u8]>::borrow_mut(&mut *self.dst)
-            [self.offset..self.end];
-        // SAFETY: `MaybeUninit<u8>` has the same layout as `u8`, and the
+    fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, SegmReclaim<'f>> {
+        let bytes = &mut self.target_[self.offset_..self.end_];
+        // SAFETY: `MaybeUninit<T>` has the same layout as `T`, and the
         // mutable slice is exclusively borrowed from `T`.
         let data = unsafe {
             slice::from_raw_parts_mut(
-                bytes.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+                bytes.as_mut_ptr().cast::<MaybeUninit<T>>(),
                 bytes.len(),
             )
         };
-        let p_offs = Pin::new(&mut self.offset);
+        let p_offs = Pin::new(&mut self.offset_);
         SegmMut::new(data, SegmReclaim::new(p_offs))
     }
 
     fn take_segm_mut<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> Option<SegmMut<'f, u8, SegmReclaim<'f>>> {
-        let c = self.end - self.offset;
+    ) -> Option<SegmMut<'f, T, SegmReclaim<'f>>> {
+        let c = self.end_ - self.offset_;
         if c == 0 {
             return Option::None;
         }
         let available = Demand::less_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = *agreement.max()?;
-        let data = &mut BorrowMut::<[u8]>::borrow_mut(&mut *self.dst)
-            [self.offset..self.offset + max_len];
+        let data = &mut self.target_[self.offset_..self.offset_ + max_len];
         let data = unsafe {
             slice::from_raw_parts_mut(
-                data.as_mut_ptr().cast::<MaybeUninit<u8>>(),
+                data.as_mut_ptr().cast::<MaybeUninit<T>>(),
                 data.len(),
             )
         };
-        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset));
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(SegmMut::new(data, reclaim))
     }
 }
 
-impl<T> Drop for BorrowedWriteSegm<'_, T>
-where
-    T: BorrowMut<[u8]>,
-{
+impl<T> Drop for BorrowedWriteSegm<'_, T> {
     fn drop(&mut self) {
-        advance_write(&mut *self.dst, self.offset);
+        advance_write(self.target_, self.offset_);
     }
 }
 
-impl<T> TrBuffSegmView for BorrowedWriteSegm<'_, T>
-where
-    T: BorrowMut<[u8]>,
-{
-    type SlicesIter<'f> = Option<&'f [MaybeUninit<u8>]> where Self: 'f;
-    type Item = MaybeUninit<u8>;
+impl<T> TrBuffSegmView for BorrowedWriteSegm<'_, T> {
+    type SlicesIter<'f> = Option<&'f [MaybeUninit<T>]> where Self: 'f;
+    type Item = MaybeUninit<T>;
 
     #[inline]
     fn is_empty(&self) -> bool {
@@ -418,19 +371,10 @@ where
     }
 }
 
-impl<'a, T> TrBuffSegmMut<'a, u8> for BorrowedWriteSegm<'a, T>
-where
-    T: BorrowMut<[u8]>,
-{
-    type Reclaimer<'f>
-        = SegmReclaim<'f>
-    where
-        Self: 'f;
+impl<'a, T> TrBuffSegmMut<'a, T> for BorrowedWriteSegm<'a, T> {
+    type Reclaimer<'f> = SegmReclaim<'f> where Self: 'f;
 
-    type TakeSegmMut<'f>
-        = Option<SegmMut<'f, u8, SegmReclaim<'f>>>
-    where
-        Self: 'f;
+    type TakeSegmMut<'f> = Option<SegmMut<'f, T, SegmReclaim<'f>>> where Self: 'f;
 
     #[inline]
     fn take_segm_mut<'f>(
@@ -441,7 +385,7 @@ where
     }
 
     #[inline]
-    fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, u8, Self::Reclaimer<'f>> {
+    fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>> {
         BorrowedWriteSegm::as_segm_mut(self)
     }
 }
@@ -450,28 +394,40 @@ where
 // Blanket impls
 // ---------------------------------------------------------------------------
 
-impl<T> TrBuffRead<u8> for T
-where
-    T: Borrow<[u8]>,
-{
-    type ReadAsync<'f> = ReadySegm<Self::SegmRef<'f>, Self::Err>
-    where
-        Self: 'f;
+impl<T> TrConsumerState for &[T] {
+    fn consumer_state(&self) -> Option<(usize, bool)> {
+        Option::Some((self.len(), self.is_empty()))
+    }
+}
 
+impl<T> TrBuffTryRead<T> for &[T] {
     type SegmRef<'f> = BorrowedReadSegm<'f, T> where Self: 'f;
 
     type Err = BorrowedSliceError<ReadErrTag>;
 
-    #[inline]
-    fn is_drained_closing(&self) -> bool {
-        Borrow::<[u8]>::borrow(self).is_empty()
+    fn try_read<'f>(
+        &'f mut self,
+        demand: &Demand<usize>,
+    ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
+        let len = self.len();
+        let min_len = demand.min().copied().unwrap_or(0);
+        if len == 0 || len < min_len {
+            let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
+            return SomeOf::new_right(err);
+        }
+        let max_len = demand.max().copied();
+        SomeOf::new_left(BorrowedReadSegm::with_limit(self, max_len))
     }
+}
+
+impl<T> TrBuffRead<T> for &[T] {
+    type ReadAsync<'f> = ReadySegm<Self::SegmRef<'f>, Self::Err> where Self: 'f;
 
     fn read_async<'f>(
         &'f mut self,
         demand: &Demand<usize>,
     ) -> Self::ReadAsync<'f> {
-        let len = Borrow::<[u8]>::borrow(self).len();
+        let len = self.len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
@@ -485,16 +441,25 @@ where
     }
 }
 
-impl<T> TrBuffTryRead<u8> for T
-where
-    T: Borrow<[u8]>,
-{
-    #[inline]
+// -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+impl<T> TrConsumerState for &mut [T] {
+    fn consumer_state(&self) -> Option<(usize, bool)> {
+        Option::Some((self.len(), self.is_empty()))
+    }
+}
+
+impl<T> TrBuffTryRead<T> for &mut [T] {
+    type SegmRef<'f> = BorrowedReadSegm<'f, T> where Self: 'f;
+
+    type Err = BorrowedSliceError<ReadErrTag>;
+
     fn try_read<'f>(
         &'f mut self,
         demand: &Demand<usize>,
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
-        let len = Borrow::<[u8]>::borrow(self).len();
+        let len = self.len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
@@ -505,29 +470,66 @@ where
     }
 }
 
-impl<T> TrBuffWrite<u8> for T
-where
-    T: BorrowMut<[u8]>,
-{
-    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, Self::Err>
-    where
-        Self: 'f;
+impl<T> TrBuffRead<T> for &mut [T] {
+    type ReadAsync<'f> = ReadySegm<Self::SegmRef<'f>, Self::Err> where Self: 'f;
 
+    fn read_async<'f>(
+        &'f mut self,
+        demand: &Demand<usize>,
+    ) -> Self::ReadAsync<'f> {
+        let len = self.len();
+        let min_len = demand.min().copied().unwrap_or(0);
+        if len == 0 || len < min_len {
+            return ReadySegm::new(SomeOf::new_right(
+                BorrowedSliceError::Empty(ReadErrTag::Closing),
+            ));
+        }
+        let max_len = demand.max().copied();
+        ReadySegm::new(SomeOf::new_left(BorrowedReadSegm::with_limit(
+            self, max_len,
+        )))
+    }
+}
+
+// -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+impl<T> TrProducerState for &mut [T] {
+    fn producer_state(&self) -> Option<(usize, bool)> {
+        Option::Some((self.len(), self.is_empty()))
+    }
+}
+
+impl<T> TrBuffTryWrite<T> for &mut [T] {
     type SegmMut<'f> = BorrowedWriteSegm<'f, T> where Self: 'f;
 
     type Err = BorrowedSliceError<WriteErrTag>;
 
-    #[inline]
-    fn is_stuffed_closing(&self) -> bool {
-        Borrow::<[u8]>::borrow(self).is_empty()
+    fn try_write<'f>(
+        &'f mut self,
+        demand: &Demand<usize>,
+    ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
+        let len = self.len();
+        let min_len = demand.min().copied().unwrap_or(0);
+        if len == 0 || len < min_len {
+            let err = BorrowedSliceError::Empty(WriteErrTag::Closing);
+            return SomeOf::new_right(err);
+        }
+        let max_len = demand.max().copied();
+        SomeOf::new_left(BorrowedWriteSegm::with_limit(self, max_len))
     }
+}
+
+impl<T> TrBuffWrite<T> for &mut [T] {
+    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, Self::Err>
+    where
+        Self: 'f;
 
     fn write_async<'f>(
         &'f mut self,
         demand: &Demand<usize>,
-    ) -> Self::WriteAsync<'f>
-    {
-        let len = Borrow::<[u8]>::borrow(self).len();
+    ) -> Self::WriteAsync<'f> {
+        let len = self.len();
         let min_len = demand.min().copied().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
@@ -541,25 +543,6 @@ where
     }
 }
 
-impl<T> TrBuffTryWrite<u8> for T
-where
-    T: BorrowMut<[u8]>,
-{
-    #[inline]
-    fn try_write<'f>(
-        &'f mut self,
-        demand: &Demand<usize>,
-    ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
-        let len = Borrow::<[u8]>::borrow(self).len();
-        let min_len = demand.min().copied().unwrap_or(0);
-        if len == 0 || len < min_len {
-            let err = BorrowedSliceError::Empty(WriteErrTag::Closing);
-            return SomeOf::new_right(err);
-        }
-        let max_len = demand.max().copied();
-        SomeOf::new_left(BorrowedWriteSegm::with_limit(self, max_len))
-    }
-}
 
 #[cfg(test)]
 mod tests_ {
@@ -582,7 +565,7 @@ mod tests_ {
         drop(segm);
 
         assert_eq!(data, b"llo");
-        assert!(!data.is_drained_closing());
+        assert!(!data.consumer_state().is_none_or(|(c, b)| c == 0 && b));
     }
 
     #[test]

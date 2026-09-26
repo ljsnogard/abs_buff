@@ -6,10 +6,7 @@
 //! trait 实现（如 `TrTaggedError`）无法匹配。
 
 use abs_buff::{
-    Demand, ReadySegm, TrBuffRead, TrBuffWrite,
-    buffer::{SegmMut, SegmReclaim, SegmRef},
-    pipelining::{PipeJoin, PipeJoinIoResult},
-    x_deps::anylr::SomeOf,
+    Demand, ReadySegm, TrBuffRead, TrBuffWrite, buffer::{SegmMut, SegmReclaim, SegmRef, TrConsumerState}, pipelining::{PipeJoin, PipeJoinIoResult}, x_deps::anylr::SomeOf,
 };
 use core::{
     future::Future,
@@ -56,19 +53,28 @@ impl<T> TestRx<T> {
     }
 }
 
-impl<T> TrBuffRead<T> for TestRx<T> {
-    type ReadAsync<'f>
-        = ReadySegm<SegmRef<'f, T, SegmReclaim<'f>>, TestErr>
-    where
-        Self: 'f;
-    type SegmRef<'f> = SegmRef<'f, T, SegmReclaim<'f>>
-    where
-        Self: 'f;
+impl<T> TrConsumerState for TestRx<T> {
+    fn consumer_state(&self) -> Option<(usize, bool)> {
+        Option::Some((self.data.len() - self.pos, self.closed))
+    }
+}
+
+impl<T> abs_buff::TrBuffTryRead<T> for TestRx<T> {
+    type SegmRef<'f> = SegmRef<'f, T, SegmReclaim<'f>> where Self: 'f;
     type Err = TestErr;
 
-    fn is_drained_closing(&self) -> bool {
-        self.closed && self.pos == self.data.len()
+    fn try_read<'f>(
+        &'f mut self,
+        demand: &'f Demand<usize>,
+    ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
+        todo!()
     }
+}
+
+impl<T> TrBuffRead<T> for TestRx<T> {
+    type ReadAsync<'f> = ReadySegm<SegmRef<'f, T, SegmReclaim<'f>>, TestErr>
+    where
+        Self: 'f;
 
     fn read_async<'f>(
         &'f mut self,
@@ -112,17 +118,28 @@ impl<T> TestTx<T> {
     }
 }
 
-impl<T> TrBuffWrite<T> for TestTx<T> {
-    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, TestErr>
-    where Self: 'f;
+impl<T> abs_buff::buffer::TrProducerState for TestTx<T> {
+    fn producer_state(&self) -> Option<(usize, bool)> {
+        let s = self.buff.len() - self.pos;
+        Option::Some((s, s == 0))
+    }
+}
 
+impl<T> abs_buff::TrBuffTryWrite<T> for TestTx<T> {
     type SegmMut<'f> = SegmMut<'f, T, SegmReclaim<'f>> where Self: 'f;
 
     type Err = TestErr;
 
-    fn is_stuffed_closing(&self) -> bool {
-        self.pos == self.buff.len()
+    fn try_write<'f>(
+        &'f mut self,
+        demand: &'f Demand<usize>,
+    ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
+        todo!()
     }
+}
+
+impl<T> TrBuffWrite<T> for TestTx<T> {
+    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, TestErr> where Self: 'f;
 
     fn write_async<'f>(
         &'f mut self,

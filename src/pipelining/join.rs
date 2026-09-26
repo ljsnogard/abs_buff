@@ -4,8 +4,8 @@ use abs_cancel::{TrCancellationToken, TrMayCancel};
 use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
-    Demand, TrBuffRead, TrBuffWrite,
-    buffer::{TrBuffSegmMut, TrBuffSegmRef, TrBuffSegmView},
+    Demand, TrBuffRead, TrBuffTryRead, TrBuffTryWrite, TrBuffWrite,
+    buffer::{TrBuffSegmMut, TrBuffSegmRef, TrBuffSegmView, TrConsumerState, TrProducerState},
     error::TrTaggedError,
 };
 
@@ -16,11 +16,11 @@ where
 {
     TxErr {
         count: usize,
-        err: <W as TrBuffWrite<T>>::Err,
+        err: <W as TrBuffTryWrite<T>>::Err,
     },
     RxErr {
         count: usize,
-        err: <R as TrBuffRead<T>>::Err,
+        err: <R as TrBuffTryRead<T>>::Err,
     },
     TxBlocked(usize),
     RxDrained(usize),
@@ -31,8 +31,8 @@ where
 /// Moves data from R to W.
 pub struct PipeJoin<'a, W, R, T = u8>
 where
-    W: TrBuffWrite<T>,
-    R: TrBuffRead<T>,
+    W: TrBuffWrite<T> + TrProducerState,
+    R: TrBuffRead<T> + TrConsumerState,
 {
     buff_w_: &'a mut W,
     buff_r_: &'a mut R,
@@ -41,8 +41,8 @@ where
 
 impl<'a, W, R, T> PipeJoin<'a, W, R, T>
 where
-    W: TrBuffWrite<T>,
-    R: TrBuffRead<T>,
+    W: TrBuffWrite<T> + TrProducerState,
+    R: TrBuffRead<T> + TrConsumerState,
 {
     pub const fn new(buff_write: &'a mut W, buff_read: &'a mut R) -> Self {
         PipeJoin {
@@ -64,8 +64,8 @@ async fn pipe_async_<'f, W, R, T, C>(
     cancel: C,
 ) -> PipeJoinIoResult<W, R, T>
 where
-    W: TrBuffWrite<T>,
-    R: TrBuffRead<T>,
+    W: TrBuffWrite<T> + TrProducerState,
+    R: TrBuffRead<T> + TrConsumerState,
     T: 'f,
     C: TrCancellationToken,
 {
@@ -77,10 +77,10 @@ where
         if c == usize::MAX {
             return PipeJoinIoResult::SizeLimit(c);
         }
-        if buff_w.is_stuffed_closing() {
+        if buff_w.producer_state().is_none_or(|(c, b)| c == 0 && b) {
             return PipeJoinIoResult::TxBlocked(c);
         }
-        if buff_r.is_drained_closing() {
+        if buff_r.consumer_state().is_none_or(|(c, b)| c == 0 && b) {
             return PipeJoinIoResult::RxDrained(c);
         }
         let r_demand = Demand::less_than(usize::MAX - c);

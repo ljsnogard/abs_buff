@@ -1,5 +1,6 @@
 // to enable no hand-written poll
 #![feature(impl_trait_in_assoc_type)]
+#![feature(impl_restriction)]
 #![feature(unboxed_closures)]
 #![feature(try_trait_v2)]
 #![feature(min_specialization)]
