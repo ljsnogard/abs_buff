@@ -3,7 +3,7 @@ use anylr::SomeOf;
 
 use crate::{
     Demand,
-    buffer::{TrConsumerState, TrBuffSegmRef},
+    buffer::TrBuffSegmRef,
     error::{ReadErrTag, TrTaggedError},
 };
 

@@ -1,8 +1,9 @@
 use core::{
+    borrow::{Borrow, BorrowMut},
     error::Error,
     fmt,
     future::Future,
-    marker::PhantomPinned,
+    marker::{PhantomData, PhantomPinned},
     mem::MaybeUninit,
     pin::Pin,
     slice,
@@ -116,65 +117,88 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Advancing a borrowed slice when a segment is reclaimed.
+// 段被回收（drop）时对借入的切片引用做推进。
 //
-// The blanket implementations cover every `Borrow<[u8]>` / `BorrowMut<[u8]>`
-// type.  The default does not mutate the underlying value, while the slice
-// reference specializations mirror `std::io::Read for &[u8]` and
-// `std::io::Write for &mut [u8]` by advancing the reference itself.
+// 语义与 `std::io::Read for &[u8]` / `std::io::Write for &mut [u8]` 一致：
+// 已消费/已写入的前缀会在段 drop 时从**调用方持有的那个引用**里摘除，而不
+// 只是在段内部记录偏移。因此承载切片的段必须记住调用方的引用本身，并在
+// drop 时把推进后的后缀写回——这正是下面两个 trait 需要对切片引用做特化、
+// 且段需要额外携带「容器类型参数 `C`」的原因。
 // ---------------------------------------------------------------------------
 
-trait TrReadAdvance {
-    fn advance_slice(&mut self, amount: usize);
+/// 段回收时把「读源引用」推进到未消费的后缀。
+///
+/// blanket 实现覆盖所有类型并默认为空操作（例如 `Vec<T>`、`Box<[T]>` 之类
+/// 不支持借出后再推进的容器）；对 `&[T]` / `&mut [T]` 两个切片引用特化出
+/// 与 `std::io::Read for &[u8]` 一致的推进语义。
+pub trait TrReadAdvance {
+    /// 从引用头部移除 `amount` 个元素。
+    fn advance_(&mut self, amount: usize);
+}
+
+impl<C> TrReadAdvance for C {
+    default fn advance_(&mut self, _amount: usize) {}
 }
 
 impl<T> TrReadAdvance for &[T] {
-    fn advance_slice(&mut self, amount: usize) {
+    fn advance_(&mut self, amount: usize) {
         let old = *self;
         *self = &old[amount..];
     }
 }
 
 impl<T> TrReadAdvance for &mut [T] {
-    fn advance_slice(&mut self, amount: usize) {
+    fn advance_(&mut self, amount: usize) {
         let old = core::mem::take(self);
         *self = &mut old[amount..];
     }
 }
 
-trait TrWriteAdvance {
-    fn advance_slice(&mut self, amount: usize);
+/// 段回收时把「写目标引用」推进到尚未写入的后缀。
+///
+/// 语义与 `std::io::Write for &mut [u8]` 一致；blanket 实现默认为空操作。
+pub trait TrWriteAdvance {
+    /// 从引用头部移除 `amount` 个已写入的槽位。
+    fn advance_(&mut self, amount: usize);
+}
+
+impl<C> TrWriteAdvance for C {
+    default fn advance_(&mut self, _amount: usize) {}
 }
 
 impl<T> TrWriteAdvance for &mut [T] {
-    fn advance_slice(&mut self, amount: usize) {
+    fn advance_(&mut self, amount: usize) {
         let old = core::mem::take(self);
         *self = &mut old[amount..];
     }
 }
 
-fn advance_read<T>(mut src: &[T], amount: usize) {
-    TrReadAdvance::advance_slice(&mut src, amount);
-}
-
-fn advance_write<T>(mut dst: &mut [T], amount: usize) {
-    TrWriteAdvance::advance_slice(&mut dst, amount);
-}
-
 // ---------------------------------------------------------------------------
-// Read segment over a `T: Borrow<[u8]>`
+// 读段：借入一个「切片引用」容器 `C`（`&[T]` 或 `&mut [T]`）
 // ---------------------------------------------------------------------------
 
-pub struct BorrowedReadSegm<'a, T> {
-    source_: &'a [T],
+/// 借入切片引用容器 `C` 的读段。
+///
+/// `C` 是调用方持有的那个切片引用（`&'x [T]` 或 `&'x mut [T]`）；段自身只
+/// 记录已消费长度，真正的推进发生在 [`Drop`]：把 `C` 改写为剩余后缀，从而
+/// 与 `std::io::Read for &[u8]` 的行为保持一致。
+pub struct BorrowedReadSegm<'a, T, C>
+where
+    C: Borrow<[T]> + TrReadAdvance,
+{
+    source_: &'a mut C,
     offset_: usize,
     end_: usize,
+    _item_: PhantomData<T>,
     _pinned_: PhantomPinned,
 }
 
-impl<'a, T> BorrowedReadSegm<'a, T> {
-    fn with_limit(source: &'a [T], max: Option<usize>) -> Self {
-        let len = source.len();
+impl<'a, T, C> BorrowedReadSegm<'a, T, C>
+where
+    C: Borrow<[T]> + TrReadAdvance,
+{
+    fn with_limit(source: &'a mut C, max: Option<usize>) -> Self {
+        let len = Borrow::<[T]>::borrow(&*source).len();
         let end_ = match max {
             Option::Some(m) if m < len => m,
             _ => len,
@@ -183,16 +207,18 @@ impl<'a, T> BorrowedReadSegm<'a, T> {
             source_: source,
             offset_: 0,
             end_,
+            _item_: PhantomData,
             _pinned_: PhantomPinned,
         }
     }
 
     fn remaining(&self) -> &[T] {
-        &self.source_[self.offset_..self.end_]
+        &Borrow::<[T]>::borrow(&*self.source_)[self.offset_..self.end_]
     }
 
     fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, SegmReclaim<'f>> {
-        let data = &self.source_[self.offset_..self.end_];
+        let data =
+            &Borrow::<[T]>::borrow(&*self.source_)[self.offset_..self.end_];
         SegmRef::new(
             data,
             SegmReclaim::new(Pin::new(&mut self.offset_))
@@ -210,19 +236,28 @@ impl<'a, T> BorrowedReadSegm<'a, T> {
         let available = Demand::less_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = *agreement.max()?;
-        let data = &self.source_[self.offset_..self.offset_ + max_len];
+        let data = &Borrow::<[T]>::borrow(&*self.source_)
+            [self.offset_..self.offset_ + max_len];
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(SegmRef::new(data, reclaim))
     }
 }
 
-impl<T> Drop for BorrowedReadSegm<'_, T> {
+impl<T, C> Drop for BorrowedReadSegm<'_, T, C>
+where
+    C: Borrow<[T]> + TrReadAdvance,
+{
     fn drop(&mut self) {
-        advance_read(self.source_, self.offset_);
+        // 把已消费的前缀写回调用方的引用。`advance_` 只做切片取子集，不会
+        // panic；即便此前已 panic 展开，也只是「未推进」，不存在悬垂。
+        self.source_.advance_(self.offset_);
     }
 }
 
-impl<T> TrBuffSegmView for BorrowedReadSegm<'_, T> {
+impl<T, C> TrBuffSegmView for BorrowedReadSegm<'_, T, C>
+where
+    C: Borrow<[T]> + TrReadAdvance,
+{
     type SlicesIter<'f> = Option<&'f [T]> where Self: 'f;
     type Item = T;
 
@@ -246,7 +281,10 @@ impl<T> TrBuffSegmView for BorrowedReadSegm<'_, T> {
     }
 }
 
-impl<'a, T> TrBuffSegmRef<'a, T> for BorrowedReadSegm<'a, T> {
+impl<'a, T, C> TrBuffSegmRef<'a, T> for BorrowedReadSegm<'a, T, C>
+where
+    C: Borrow<[T]> + TrReadAdvance,
+{
     type Reclaimer<'f> = SegmReclaim<'f> where Self: 'f;
 
     type TakeSegmRef<'f> = Option<SegmRef<'f, T, SegmReclaim<'f>>>
@@ -267,19 +305,30 @@ impl<'a, T> TrBuffSegmRef<'a, T> for BorrowedReadSegm<'a, T> {
 }
 
 // ---------------------------------------------------------------------------
-// Write segment over a `&mut [T]`
+// 写段：借入一个 `&mut [T]` 引用容器 `C`
 // ---------------------------------------------------------------------------
 
-pub struct BorrowedWriteSegm<'a, T> {
-    target_: &'a mut [T],
+/// 借入 `&mut [T]` 引用容器 `C` 的写段。
+///
+/// `C` 是调用方持有的那个可变切片引用；段在 [`Drop`] 时把已写入的前缀从
+/// `C` 中摘除，从而与 `std::io::Write for &mut [u8]` 的行为保持一致。
+pub struct BorrowedWriteSegm<'a, T, C>
+where
+    C: BorrowMut<[T]> + TrWriteAdvance,
+{
+    target_: &'a mut C,
     offset_: usize,
     end_: usize,
-    _pinned: PhantomPinned,
+    _item_: PhantomData<T>,
+    _pinned_: PhantomPinned,
 }
 
-impl<'a, T> BorrowedWriteSegm<'a, T> {
-    fn with_limit(target: &'a mut [T], max: Option<usize>) -> Self {
-        let len = target.len();
+impl<'a, T, C> BorrowedWriteSegm<'a, T, C>
+where
+    C: BorrowMut<[T]> + TrWriteAdvance,
+{
+    fn with_limit(target: &'a mut C, max: Option<usize>) -> Self {
+        let len = Borrow::<[T]>::borrow(&*target).len();
         let end_ = match max {
             Option::Some(m) if m < len => m,
             _ => len,
@@ -288,12 +337,14 @@ impl<'a, T> BorrowedWriteSegm<'a, T> {
             target_: target,
             offset_: 0,
             end_,
-            _pinned: PhantomPinned,
+            _item_: PhantomData,
+            _pinned_: PhantomPinned,
         }
     }
 
     fn remaining(&self) -> &[MaybeUninit<T>] {
-        let bytes = &self.target_[self.offset_..self.end_];
+        let bytes =
+            &Borrow::<[T]>::borrow(&*self.target_)[self.offset_..self.end_];
         // SAFETY: `MaybeUninit<T>` has the same layout as `T`, and the
         // slice lifetime is tied to the underlying borrowed bytes.
         unsafe {
@@ -305,7 +356,8 @@ impl<'a, T> BorrowedWriteSegm<'a, T> {
     }
 
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, SegmReclaim<'f>> {
-        let bytes = &mut self.target_[self.offset_..self.end_];
+        let bytes = &mut BorrowMut::<[T]>::borrow_mut(&mut *self.target_)
+            [self.offset_..self.end_];
         // SAFETY: `MaybeUninit<T>` has the same layout as `T`, and the
         // mutable slice is exclusively borrowed from `T`.
         let data = unsafe {
@@ -329,7 +381,8 @@ impl<'a, T> BorrowedWriteSegm<'a, T> {
         let available = Demand::less_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = *agreement.max()?;
-        let data = &mut self.target_[self.offset_..self.offset_ + max_len];
+        let data = &mut BorrowMut::<[T]>::borrow_mut(&mut *self.target_)
+            [self.offset_..self.offset_ + max_len];
         let data = unsafe {
             slice::from_raw_parts_mut(
                 data.as_mut_ptr().cast::<MaybeUninit<T>>(),
@@ -341,13 +394,21 @@ impl<'a, T> BorrowedWriteSegm<'a, T> {
     }
 }
 
-impl<T> Drop for BorrowedWriteSegm<'_, T> {
+impl<T, C> Drop for BorrowedWriteSegm<'_, T, C>
+where
+    C: BorrowMut<[T]> + TrWriteAdvance,
+{
     fn drop(&mut self) {
-        advance_write(self.target_, self.offset_);
+        // 把已写入的前缀写回调用方的可变引用，与
+        // `std::io::Write for &mut [u8]` 一致。
+        self.target_.advance_(self.offset_);
     }
 }
 
-impl<T> TrBuffSegmView for BorrowedWriteSegm<'_, T> {
+impl<T, C> TrBuffSegmView for BorrowedWriteSegm<'_, T, C>
+where
+    C: BorrowMut<[T]> + TrWriteAdvance,
+{
     type SlicesIter<'f> = Option<&'f [MaybeUninit<T>]> where Self: 'f;
     type Item = MaybeUninit<T>;
 
@@ -371,7 +432,10 @@ impl<T> TrBuffSegmView for BorrowedWriteSegm<'_, T> {
     }
 }
 
-impl<'a, T> TrBuffSegmMut<'a, T> for BorrowedWriteSegm<'a, T> {
+impl<'a, T, C> TrBuffSegmMut<'a, T> for BorrowedWriteSegm<'a, T, C>
+where
+    C: BorrowMut<[T]> + TrWriteAdvance,
+{
     type Reclaimer<'f> = SegmReclaim<'f> where Self: 'f;
 
     type TakeSegmMut<'f> = Option<SegmMut<'f, T, SegmReclaim<'f>>> where Self: 'f;
@@ -401,7 +465,7 @@ impl<T> TrConsumerState for &[T] {
 }
 
 impl<T> TrBuffTryRead<T> for &[T] {
-    type SegmRef<'f> = BorrowedReadSegm<'f, T> where Self: 'f;
+    type SegmRef<'f> = BorrowedReadSegm<'f, T, Self> where Self: 'f;
 
     type Err = BorrowedSliceError<ReadErrTag>;
 
@@ -451,7 +515,7 @@ impl<T> TrConsumerState for &mut [T] {
 }
 
 impl<T> TrBuffTryRead<T> for &mut [T] {
-    type SegmRef<'f> = BorrowedReadSegm<'f, T> where Self: 'f;
+    type SegmRef<'f> = BorrowedReadSegm<'f, T, Self> where Self: 'f;
 
     type Err = BorrowedSliceError<ReadErrTag>;
 
@@ -501,7 +565,7 @@ impl<T> TrProducerState for &mut [T] {
 }
 
 impl<T> TrBuffTryWrite<T> for &mut [T] {
-    type SegmMut<'f> = BorrowedWriteSegm<'f, T> where Self: 'f;
+    type SegmMut<'f> = BorrowedWriteSegm<'f, T, Self> where Self: 'f;
 
     type Err = BorrowedSliceError<WriteErrTag>;
 
@@ -548,6 +612,12 @@ impl<T> TrBuffWrite<T> for &mut [T] {
 mod tests_ {
     use super::*;
 
+    /// 验证 `&[T]` 作为读源时，段被回收后会像 `std::io::Read for &[u8]` 一样
+    /// 推进调用方持有的切片引用。
+    /// - 手段：以 `b"hello"` 构造 `&[u8]`，经 `try_read` 借出段并搬走 2 个
+    ///   元素，随后依次 drop 子段与父段。
+    /// - 判断：`data` 应推进为 `b"llo"`（而非仍指向 `b"hello"`），且
+    ///   `consumer_state` 报告的长度非零、未关闭。
     #[test]
     fn read_borrowed_slice_advances_like_std() {
         let mut data: &[u8] = b"hello";
@@ -568,6 +638,10 @@ mod tests_ {
         assert!(!data.consumer_state().is_none_or(|(c, b)| c == 0 && b));
     }
 
+    /// 验证 `&mut [T]` 作为读源时，段被回收后同样推进调用方的可变切片引用。
+    /// - 手段：以 `[1, 2, 3, 4]` 构造 `&mut [u8]`，经 `try_read` 借出段并搬走
+    ///   前 3 个元素，随后依次 drop 子段与父段。
+    /// - 判断：`data` 应只剩下第 4 个元素 `[4]`。
     #[test]
     fn read_borrowed_mut_slice_advances() {
         let mut storage = [1u8, 2, 3, 4];
@@ -588,6 +662,12 @@ mod tests_ {
         assert_eq!(data, &[4u8][..]);
     }
 
+    /// 验证 `&mut [T]` 作为写目标时，段被回收后会像
+    /// `std::io::Write for &mut [u8]` 一样推进调用方的可变切片引用。
+    /// - 手段：以 5 字节零数组构造 `&mut [u8]`，经 `try_write` 借出段并写入
+    ///   `b"abc"`，随后依次 drop 子段与父段。
+    /// - 判断：`data` 应推进为剩余的两个未写槽位 `[0, 0]`，同时底层 `storage`
+    ///   的前 3 字节应为 `b"abc"`（证明写入确实落到了原存储上）。
     #[test]
     fn write_borrowed_mut_slice_advances_like_std() {
         let mut storage = [0u8; 5];
