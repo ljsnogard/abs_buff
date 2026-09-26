@@ -6,7 +6,10 @@
 //! trait 实现（如 `TrTaggedError`）无法匹配。
 
 use abs_buff::{
-    Demand, ReadySegm, TrBuffRead, TrBuffWrite, buffer::{SegmMut, SegmReclaim, SegmRef, TrConsumerState}, pipelining::{PipeJoin, PipeJoinIoResult}, x_deps::anylr::SomeOf,
+    Demand, ReadySegm, TrBuffRead, TrBuffTryRead, TrBuffTryWrite, TrBuffWrite,
+    buffer::{SegmMut, SegmReclaim, SegmRef, TrConsumerState, TrProducerState},
+    pipelining::{PipeJoin, PipeJoinIoResult},
+    x_deps::anylr::SomeOf,
 };
 use core::{
     future::Future,
@@ -19,13 +22,12 @@ use std::{vec, vec::Vec};
 use abs_buff_testkit::TestErr;
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// Test doubles: a read buffer and a write buffer built directly on
-// `SegmRef` / `SegmMut` with `SegmReclaim`, so the pipe exercises the real
-// segment machinery end to end.
+// 测试替身：直接架在 `SegmRef` / `SegmMut` + `SegmReclaim` 上的读/写缓冲，
+// 让管道端到端地走真实的段机制。
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-/// The read (rx) half: a `Vec` of unconsumed data plus a consumption
-/// counter advanced by the `SegmReclaim` of the borrowed segments.
+/// 读端（rx）：一个存放未消费数据的 `Vec`，外加一个由借出段的
+/// `SegmReclaim` 推进的消费位置。
 struct TestRx<T> {
     data: Vec<T>,
     pos: usize,
@@ -59,7 +61,7 @@ impl<T> TrConsumerState for TestRx<T> {
     }
 }
 
-impl<T> abs_buff::TrBuffTryRead<T> for TestRx<T> {
+impl<T> TrBuffTryRead<T> for TestRx<T> {
     type SegmRef<'f> = SegmRef<'f, T, SegmReclaim<'f>> where Self: 'f;
     type Err = TestErr;
 
@@ -67,7 +69,15 @@ impl<T> abs_buff::TrBuffTryRead<T> for TestRx<T> {
         &'f mut self,
         demand: &'f Demand<usize>,
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
-        todo!()
+        let mut take = demand.max().copied().unwrap_or(usize::MAX);
+        if self.chunk > 0 {
+            take = core::cmp::min(take, self.chunk);
+        }
+        take = core::cmp::min(take, self.data.len() - self.pos);
+        let buffer = &mut self.data[self.pos..self.pos + take];
+        let reclaim = SegmReclaim::new(Pin::new(&mut self.pos));
+        let segm = SegmRef::new(buffer, reclaim);
+        SomeOf::new_left(segm)
     }
 }
 
@@ -78,22 +88,15 @@ impl<T> TrBuffRead<T> for TestRx<T> {
 
     fn read_async<'f>(
         &'f mut self,
-        demand: &Demand<usize>,
+        demand: &'f Demand<usize>,
     ) -> Self::ReadAsync<'f> {
-        let mut take = demand.max().copied().unwrap_or(usize::MAX);
-        if self.chunk > 0 {
-            take = core::cmp::min(take, self.chunk);
-        }
-        take = core::cmp::min(take, self.data.len() - self.pos);
-        let buffer = &mut self.data[self.pos..self.pos + take];
-        let reclaim = SegmReclaim::new(Pin::new(&mut self.pos));
-        let segm = SegmRef::new(buffer, reclaim);
-        ReadySegm::new(SomeOf::new_left(segm))
+        // 本测试设备同步就绪：直接复用 `try_read`，避免两条路径逻辑漂移。
+        ReadySegm::new(<Self as TrBuffTryRead<T>>::try_read(self, demand))
     }
 }
 
-/// The write (tx) half: a fixed `MaybeUninit` storage; the borrowed
-/// segments advance `pos` via `SegmReclaim` as data is written into them.
+/// 写端（tx）：一块固定容量的 `MaybeUninit` 存储；数据写入时由借出段的
+/// `SegmReclaim` 推进写入位置。
 struct TestTx<T> {
     buff: Vec<MaybeUninit<T>>,
     pos: usize,
@@ -106,7 +109,7 @@ impl<T> TestTx<T> {
         TestTx { buff, pos: 0 }
     }
 
-    /// The items actually written so far, in order.
+    /// 目前已按序写入的元素。
     fn collected(&self) -> Vec<T>
     where
         T: Copy,
@@ -118,14 +121,14 @@ impl<T> TestTx<T> {
     }
 }
 
-impl<T> abs_buff::buffer::TrProducerState for TestTx<T> {
+impl<T> TrProducerState for TestTx<T> {
     fn producer_state(&self) -> Option<(usize, bool)> {
         let s = self.buff.len() - self.pos;
         Option::Some((s, s == 0))
     }
 }
 
-impl<T> abs_buff::TrBuffTryWrite<T> for TestTx<T> {
+impl<T> TrBuffTryWrite<T> for TestTx<T> {
     type SegmMut<'f> = SegmMut<'f, T, SegmReclaim<'f>> where Self: 'f;
 
     type Err = TestErr;
@@ -134,20 +137,9 @@ impl<T> abs_buff::TrBuffTryWrite<T> for TestTx<T> {
         &'f mut self,
         demand: &'f Demand<usize>,
     ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
-        todo!()
-    }
-}
-
-impl<T> TrBuffWrite<T> for TestTx<T> {
-    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, TestErr> where Self: 'f;
-
-    fn write_async<'f>(
-        &'f mut self,
-        demand: &Demand<usize>,
-    ) -> Self::WriteAsync<'f> {
         let free = self.buff.len() - self.pos;
         if free == 0 {
-            return ReadySegm::new(SomeOf::new_right(TestErr::Stuffed));
+            return SomeOf::new_right(TestErr::Stuffed);
         }
         let take = core::cmp::min(
             demand.max().copied().unwrap_or(usize::MAX),
@@ -157,12 +149,24 @@ impl<T> TrBuffWrite<T> for TestTx<T> {
             &mut self.buff[self.pos..self.pos + take],
             SegmReclaim::new(Pin::new(&mut self.pos)),
         );
-        ReadySegm::new(SomeOf::new_left(segm))
+        SomeOf::new_left(segm)
     }
 }
 
-/// Poll a future to completion without an executor; all the futures used
-/// here are ready on their first poll.
+impl<T> TrBuffWrite<T> for TestTx<T> {
+    type WriteAsync<'f> = ReadySegm<Self::SegmMut<'f>, TestErr> where Self: 'f;
+
+    fn write_async<'f>(
+        &'f mut self,
+        demand: &'f Demand<usize>,
+    ) -> Self::WriteAsync<'f> {
+        // 本测试设备同步就绪：直接复用 `try_write`，避免两条路径逻辑漂移。
+        ReadySegm::new(<Self as TrBuffTryWrite<T>>::try_write(self, demand))
+    }
+}
+
+/// 在没有执行器的前提下把 future 轮询到完成；本文件用到的 future 都在
+/// 第一次 poll 时就绪。
 fn block_on<F: Future>(fut: F) -> F::Output {
     let mut fut = core::pin::pin!(fut);
     let waker = Waker::noop();
@@ -170,17 +174,20 @@ fn block_on<F: Future>(fut: F) -> F::Output {
     match fut.as_mut().poll(&mut cx) {
         Poll::Ready(v) => v,
         Poll::Pending => {
-            panic!("the pipe future must complete on the first poll")
+            panic!("管道 future 必须在第一次 poll 时就绪")
         }
     }
 }
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// PipeJoin behavior
+// PipeJoin 行为
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-/// The happy path: everything readable is moved into the writer, in order,
-/// and the pipe reports `RxDrained` with the exact transferred count.
+/// 验证正常路径：读端的全部可读数据按序搬进写端，并以精确数量报告 `RxDrained`。
+/// - 手段：读端放入 100 字节且标记为关闭，写端容量给足，`block_on` 一次
+///   `pipe_async`。
+/// - 判断：结果为 `RxDrained(100)`；读端 `pos` 推进到 100；写端收到的字节序列
+///   与输入完全一致。
 #[test]
 fn pipe_transfers_all_data_and_reports_drained() {
     const TOTAL: usize = 100;
@@ -194,16 +201,18 @@ fn pipe_transfers_all_data_and_reports_drained() {
     });
 
     assert!(matches!(result, PipeJoinIoResult::RxDrained(c) if c == TOTAL));
-    assert_eq!(rx.pos, TOTAL, "the reader must consume everything");
+    assert_eq!(rx.pos, TOTAL, "读端必须消费全部数据");
     assert_eq!(
         tx.collected(),
         expected,
-        "the writer must receive everything in order"
+        "写端必须按序收到全部数据"
     );
 }
 
-/// The reader yields its data in chunks: each `read_async` must hand out
-/// exactly the next chunk, and the pipe must drain all of them.
+/// 验证读端分块借出时，每次 `read_async` 交出的都是紧接上一块的下一段内容。
+/// - 手段：读端放入 100 字节、块大小设为 30，写端容量给足，跑完 `pipe_async`。
+/// - 判断：结果为 `RxDrained(100)`，且写端收到的序列与输入完全一致（若分块
+///   错位，序列会在拼接处不匹配）。
 #[test]
 fn pipe_reads_in_chunks_next_chunk_is_next_content() {
     const TOTAL: usize = 100;
@@ -221,10 +230,12 @@ fn pipe_reads_in_chunks_next_chunk_is_next_content() {
     assert_eq!(tx.collected(), expected);
 }
 
-/// A mid-transfer blockage: the writer accepts one piece, then reports
-/// `Blocked`. The pipe must report `TxErr` with exactly that piece size,
-/// leave the reader right after the transferred data, and allow a retry on
-/// a fresh writer to transfer the rest — no duplication, no loss.
+/// 验证中途写端塞满时报告 `TxErr` 并准确定位断点，换一个更大的写端续传后
+/// 不重不漏。
+/// - 手段：读端 100 字节；先用容量 16 的写端跑一次，再用容量足够的写端对同一
+///   读端续跑一次。
+/// - 判断：首次为 `TxErr { count: 16, err: Stuffed }`、读端 `pos` 停在 16、
+///   写端恰为前 16 字节；续跑为 `RxDrained(84)`，第二个写端恰为后 84 字节。
 #[test]
 fn pipe_partial_transfer_then_retry_no_dup_no_loss() {
     const TOTAL: usize = 100;
@@ -240,14 +251,14 @@ fn pipe_partial_transfer_then_retry_no_dup_no_loss() {
     });
     assert!(
         matches!(result, PipeJoinIoResult::TxErr { count, err: TestErr::Stuffed } if count == TX_CAP),
-        "exactly one write piece must be transferred"
+        "必须恰好只搬走一个写入块"
     );
-    // The reader stopped right after the transferred piece...
+    // 读端停在被搬走的那一块之后……
     assert_eq!(rx.pos, TX_CAP);
-    // ...and the writer holds exactly the first piece.
+    // ……写端持有的也恰好是这一块。
     assert_eq!(tx.collected(), expected[..TX_CAP]);
 
-    // Retry with a fresh, big-enough writer: the rest arrives, exactly once.
+    // 换一个容量足够的写端续传：剩余数据恰好到达一次。
     let mut tx2 = TestTx::with_capacity(TOTAL + 32);
     let result2 = block_on(async {
         let mut pipe = PipeJoin::new(&mut tx2, &mut rx);
@@ -259,8 +270,9 @@ fn pipe_partial_transfer_then_retry_no_dup_no_loss() {
     assert_eq!(tx2.collected(), expected[TX_CAP..]);
 }
 
-/// The writer is already full before the pipe starts: report `TxBlocked`
-/// without consuming anything.
+/// 验证写端一开始就写满时报告 `TxBlocked`，且不消费读端任何数据。
+/// - 手段：读端 3 字节，写端容量为 0，跑一次 `pipe_async`。
+/// - 判断：结果为 `TxBlocked(0)`，读端 `pos` 仍为 0。
 #[test]
 fn pipe_blocked_tx_reports_blocked_without_consuming() {
     let mut rx = TestRx::new(vec![1u8, 2, 3], true);
@@ -274,12 +286,13 @@ fn pipe_blocked_tx_reports_blocked_without_consuming() {
     assert!(matches!(result, PipeJoinIoResult::TxBlocked(0)));
     assert_eq!(
         rx.pos, 0,
-        "nothing must be consumed when the writer is blocked"
+        "写端阻塞时不得消费任何数据"
     );
 }
 
-/// The reader is already drained before the pipe starts: report
-/// `RxDrained(0)`.
+/// 验证读端一开始就已枯竭时报告 `RxDrained(0)`，且不向写端写入任何数据。
+/// - 手段：空读端、容量 8 的写端，跑一次 `pipe_async`。
+/// - 判断：结果为 `RxDrained(0)`，写端 `pos` 仍为 0。
 #[test]
 fn pipe_drained_rx_reports_drained() {
     let mut rx = TestRx::new(Vec::<u8>::new(), true);
@@ -293,11 +306,13 @@ fn pipe_drained_rx_reports_drained() {
     assert!(matches!(result, PipeJoinIoResult::RxDrained(0)));
     assert_eq!(
         tx.pos, 0,
-        "nothing must be written when the reader is drained"
+        "读端枯竭时不得写入任何数据"
     );
 }
 
-/// A zero-sized item type short-circuits the pipe into `NoOps`.
+/// 验证零尺寸元素类型会让管道短路为 `NoOps`。
+/// - 手段：读写端都以 `()` 作为元素类型，跑一次 `pipe_async`。
+/// - 判断：结果为 `NoOps`，读端与写端的 `pos` 都保持 0。
 #[test]
 fn pipe_zst_returns_no_ops() {
     let mut rx = TestRx::new(vec![(); 4], true);

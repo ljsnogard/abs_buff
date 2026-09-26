@@ -28,8 +28,12 @@ use abs_buff_testkit::{TestInput, TestOutput, read_initialized};
 // `SegmReclaim` 计数器；泛型函数在段层面断言搬移数量与消费量，测试主体
 // 在底层存储上断言内容按序到达、回收计数器精确提交。
 
-/// 通过 trait 默认实现把 `SegmRef` 的全部元素搬进 `SegmMut`
-/// （`move_items_to_segm` 与镜像的 `move_items_from_segm` 都验证）。
+/// 验证 `TrBuffSegmRef` / `TrBuffSegmMut` 上 `move_items_*` trait 默认实现的
+/// 搬移语义（四个方向：to_segm / from_segm / to_buff / from_buff）。
+/// - 手段：每个方向用「源 `Vec` + 目标数组」构造段与 `SegmReclaim` 计数器，
+///   调用 `abs_buff-testkit` 的泛型断言函数（函数内部会校验段视图内容）。
+/// - 判断：搬移数量等于期望长度、两侧段均被全部消费/填充，底层存储按序得到
+///   期望内容，且段 drop 后回收计数器精确提交相应的消费量。
 #[test]
 fn segm_move_items_trait_defaults() {
     use abs_buff_testkit as t;
@@ -126,8 +130,12 @@ fn segm_move_items_trait_defaults() {
     }
 }
 
-/// 测试 `SegmRef::move_items_to_output_async`：从段中把数据移动到
-/// `TrOutput`，并正确推进段内部的 `offset_`。
+/// 验证 `SegmRef::move_items_to_output_async`：把段内数据写入 `TrOutput`，
+/// 并正确推进段内部的消费偏移。
+/// - 手段：用 0..10 构造段，`demand` 上界为 6，经 `compio` 运行时 await 该
+///   异步搬移，写入 testkit 的 `TestOutput`。
+/// - 判断：返回搬移数量为 6、父段剩余 4、输出快照为 0..6，且段 drop 时
+///   reclaimer 提交的消费量为 6。
 #[compio::test]
 async fn segm_ref_output_async_moves_data_and_advances_offset() {
     let mut data: Vec<u8> = (0..10).collect();
@@ -157,8 +165,12 @@ async fn segm_ref_output_async_moves_data_and_advances_offset() {
     assert_eq!(consumed, 6, "段 drop 时应把消费量提交给 reclaimer");
 }
 
-/// 测试 `SegmMut::move_items_from_input_async`：从 `TrInput` 读取数据到段中，
-/// 并正确推进段内部的 `offset_`。
+/// 验证 `SegmMut::move_items_from_input_async`：从 `TrInput` 读入数据到段，
+/// 并正确推进段内部的消费偏移。
+/// - 手段：用容量 10 的段与持有 0..10 数据的 testkit `TestInput`，`demand`
+///   上界为 7，经 `compio` 运行时 await 该异步搬移。
+/// - 判断：返回读入数量为 7、父段剩余 3、底层存储前 7 个元素为 0..7，且段
+///   drop 时 reclaimer 提交的消费量为 7。
 #[compio::test]
 async fn segm_mut_input_async_reads_data_and_advances_offset() {
     let mut storage = [MaybeUninit::<u8>::uninit(); 10];

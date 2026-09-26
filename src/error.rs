@@ -102,6 +102,17 @@ impl IoErrTag {
     }
 }
 impl TrErrTag for IoErrTag {}
+impl From<ReadErrTag> for IoErrTag {
+    fn from(value: ReadErrTag) -> Self {
+        IoErrTag::Read(value)
+    }
+}
+impl From<WriteErrTag> for IoErrTag {
+    fn from(value: WriteErrTag) -> Self {
+        IoErrTag::Write(value)
+    }
+}
+
 impl core::fmt::Display for IoErrTag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -271,4 +282,3 @@ where
         Result::Ok(self.err_)
     }
 }
-
