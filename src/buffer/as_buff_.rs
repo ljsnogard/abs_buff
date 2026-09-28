@@ -1,57 +1,45 @@
-use core::mem::MaybeUninit;
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::MaybeUninit,
+};
+
+use super::buff_::{TrMaybeUninitSlice, TrMaybeUninitSliceMut};
 
 pub trait TrAsBuffer<T> {
     /// Explicitly declare that the termination of evaluation for
     /// `TrMaybeUninit` be `core::mem::MaybeUninit`.
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>];
+    fn as_buff(&self) -> &[MaybeUninit<T>];
 }
 
 pub trait TrAsBufferMut<T>
 where
     Self: TrAsBuffer<T>,
 {
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>];
-}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer TrBufferMut for `[MaybeUninit<T>; N]`, array of maybe uninit
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T, const N: usize> TrAsBuffer<T> for [T; N]
-where
-    T: Copy,
-{
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        let p = self.as_ref().as_ptr() as *const MaybeUninit<T>;
-        unsafe { core::slice::from_raw_parts(p, N) }
-    }
-}
-
-impl<T, const N: usize> TrAsBufferMut<T> for [T; N]
-where
-    T: Copy,
-{
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        let p = self.as_mut().as_ptr() as *mut T as *mut MaybeUninit<T>;
-        unsafe { core::slice::from_raw_parts_mut(p, N) }
-    }
+    fn as_mut_buff(&mut self) -> &mut [MaybeUninit<T>];
 }
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 // impl TrBuffer for `&<[MaybeUninit<T>]>`
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-impl<T> TrAsBuffer<T> for &[T]
+impl<C, T> TrAsBuffer<T> for C
+where
+    C: Borrow<[T]>,
+{
+    #[inline]
+    default fn as_buff(&self) -> &[MaybeUninit<T>] {
+        let len = self.borrow().len();
+        let data = self.borrow().as_ptr() as *const MaybeUninit<T>;
+        unsafe { core::slice::from_raw_parts(data, len) }
+    }
+}
+
+impl<T> TrAsBuffer<T> for [T]
 where
     T: Copy,
 {
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        let len = self.len();
-        let data = self.as_ref().as_ptr() as *const MaybeUninit<T>;
-        unsafe { core::slice::from_raw_parts(data, len) }
+    fn as_buff(&self) -> &[MaybeUninit<T>] {
+        self.as_uninit_slice()
     }
 }
 
@@ -59,26 +47,23 @@ where
 // impl TrBuffer TrBufferMut for `&mut [MaybeUninit<T>]`
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-impl<T> TrAsBuffer<T> for &mut [T]
+impl<C, T> TrAsBufferMut<T> for C
 where
-    T: Copy,
+    C: BorrowMut<[T]>,
 {
     #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        let len = self.len();
-        let data = self.as_ref().as_ptr() as *const MaybeUninit<T>;
-        unsafe { core::slice::from_raw_parts(data, len) }
+    default fn as_mut_buff(&mut self) -> &mut [MaybeUninit<T>] {
+        let len = self.borrow_mut().len();
+        let data = self.borrow_mut().as_ptr() as *mut MaybeUninit<T>;
+        unsafe { core::slice::from_raw_parts_mut(data, len) }
     }
 }
 
-impl<T> TrAsBufferMut<T> for &mut [T]
+impl<T> TrAsBufferMut<T> for [T]
 where
     T: Copy,
 {
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        let len = self.len();
-        let data = self.as_mut().as_ptr() as *mut MaybeUninit<T>;
-        unsafe { core::slice::from_raw_parts_mut(data, len) }
+    fn as_mut_buff(&mut self) -> &mut [MaybeUninit<T>] {
+        self.as_uninit_slice_mut()
     }
 }

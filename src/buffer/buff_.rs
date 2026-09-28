@@ -1,17 +1,16 @@
 use core::{
+    borrow::{Borrow, BorrowMut},
     mem::{self, MaybeUninit},
     slice,
 };
 
-use crate::buffer::{TrAsBuffer, TrAsBufferMut};
-
-/// A trait specifically abstracted from `MaybeUninit<T>` or types alike.
+/// A marker trait specifically abstracted from `MaybeUninit<T>` or types alike.
 ///
 /// # Safety
-/// The only reasonable implementation is core::mem::MaybeUninit<T>, which is
-/// already included in this crate.
+/// - The only reasonable implementation is core::mem::MaybeUninit<T>, which is
+///   already included in this crate.
 pub impl(crate) unsafe trait TrMaybeUninit {
-    type Inner: Sized;
+    type Inner: ?Sized;
 
     /// See [core::mem::MaybeUninit::uninit]
     fn uninit() -> Self;
@@ -62,126 +61,24 @@ pub impl(crate) unsafe trait TrMaybeUninit {
     fn write(&mut self, value: Self::Inner) -> &mut Self::Inner;
 }
 
-/// A continuous memory space that can read and write items.
-///
-/// The reasonable implementations are already included in this crate. They are
-/// `[MaybeUninit<T>; N]`, `MaybeUninit<[T; N]>`, `&mut MaybeUninit<[T; N]>`,
-/// and `&mut [MaybeUninit<T>] `
-pub trait TrBuffer
+
+/// A trait to unify `[T]` and `[MaybeUninit<T>]` when `T: Copy`.
+/// # Safety
+/// - The only reasonable implementations are `[MaybeUninit<T>]` and `MaybeUninit<[T; N]>`
+pub impl(crate) unsafe trait TrMaybeUninitSlice<T> {
+    /// 返回一个指向相同内存的 `[MaybeUninit<T>]` 视图。
+    fn as_uninit_slice(&self) -> &[MaybeUninit<T>];
+}
+
+/// A trait to unify `[T]` and `[MaybeUninit<T>]` when `T: Copy`.
+/// # Safety
+/// - The only reasonable implementations are `[MaybeUninit<T>]` and `MaybeUninit<[T; N]>`
+pub impl(crate) unsafe trait TrMaybeUninitSliceMut<T>
 where
-    Self: TrAsBuffer<<Self::Slot as TrMaybeUninit>::Inner>,
+    Self: TrMaybeUninitSlice<T>,
 {
-    type Slot: TrMaybeUninit;
-}
-
-pub trait TrBufferMut
-where
-    Self: TrBuffer
-        + TrAsBufferMut<<<Self as TrBuffer>::Slot as TrMaybeUninit>::Inner>,
-{}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer TrBufferMut for `[MaybeUninit<T>; N]`, array of maybe uninit
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T, const N: usize> TrAsBuffer<T> for [MaybeUninit<T>; N] {
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        self.as_ref()
-    }
-}
-
-impl<T, const N: usize> TrAsBufferMut<T> for [MaybeUninit<T>; N] {
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        self.as_mut()
-    }
-}
-
-impl<T, const N: usize> TrBuffer for [MaybeUninit<T>; N] {
-    type Slot = MaybeUninit<T>;
-}
-
-impl<T, const N: usize> TrBufferMut for [MaybeUninit<T>; N] {}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer TrBufferMut for `MaybeUninit<[T; N]>` a maybe uninit array
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T, const N: usize> TrAsBuffer<T> for MaybeUninit<[T; N]> {
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        unsafe { mem::transmute(self.assume_init_ref().as_ref()) }
-    }
-}
-
-impl<T, const N: usize> TrAsBufferMut<T> for MaybeUninit<[T; N]> {
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe { mem::transmute(self.assume_init_mut().as_mut()) }
-    }
-}
-
-impl<T, const N: usize> TrBuffer for MaybeUninit<[T; N]> {
-    type Slot = MaybeUninit<T>;
-}
-
-impl<T, const N: usize> TrBufferMut for MaybeUninit<[T; N]> {}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer TrBufferMut for `&mut MaybeUninit<[T; N]>`
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T, const N: usize> TrAsBuffer<T> for &mut MaybeUninit<[T; N]> {
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        unsafe { mem::transmute(self.assume_init_ref().as_ref()) }
-    }
-}
-
-impl<T, const N: usize> TrAsBufferMut<T> for &mut MaybeUninit<[T; N]> {
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe { mem::transmute(self.assume_init_mut().as_mut()) }
-    }
-}
-
-impl<T, const N: usize> TrBuffer for &mut MaybeUninit<[T; N]> {
-    type Slot = MaybeUninit<T>;
-}
-
-impl<T, const N: usize> TrBufferMut for &mut MaybeUninit<[T; N]> {}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer for `&<[MaybeUninit<T>]>`
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T> TrAsBuffer<T> for &[MaybeUninit<T>] {
-    #[inline]
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        self
-    }
-}
-
-impl<T> TrBuffer for &[MaybeUninit<T>] {
-    type Slot = MaybeUninit<T>;
-}
-
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-// impl TrBuffer TrBufferMut for `&mut [MaybeUninit<T>]`
-//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
-
-impl<T> TrAsBuffer<T> for &mut [MaybeUninit<T>] {
-    fn as_slice_uninit(&self) -> &[MaybeUninit<T>] {
-        self
-    }
-}
-
-impl<T> TrAsBufferMut<T> for &mut [MaybeUninit<T>] {
-    #[inline]
-    fn as_mut_slice_uninit(&mut self) -> &mut [MaybeUninit<T>] {
-        self
-    }
+    /// 返回一个可变的 `[MaybeUninit<Self::Item>]` 视图。
+    fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>];
 }
 
 //-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -257,28 +154,51 @@ unsafe impl<T> TrMaybeUninit for MaybeUninit<T> {
     }
 }
 
-#[cfg(test)]
-mod tests_ {
-    #[allow(unused)]
-    use super::*;
+//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+// impl TrMaybeUninitSlice<T> for `[MaybeUninit<T>]`
+//-- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
-    #[test]
-    fn array_as_slice_uninit() {
-        const L: usize = 3usize;
-        let mut a = [MaybeUninit::<usize>::uninit(); L];
-        let s: &[MaybeUninit<usize>] = a.as_slice_uninit();
-        assert_eq!(s.len(), L);
-        let s: &mut [MaybeUninit<usize>] = a.as_mut_slice_uninit();
-        assert_eq!(s.len(), L);
+unsafe impl<C, T> TrMaybeUninitSlice<T> for C
+where
+    C: Borrow<[MaybeUninit<T>]>,
+{
+    fn as_uninit_slice(&self) -> &[MaybeUninit<T>] {
+        self.borrow()
     }
+}
 
-    #[test]
-    fn uninit_array_as_slice_uninit() {
-        const L: usize = 3usize;
-        let mut a: MaybeUninit<[usize; 3]> = MaybeUninit::uninit();
-        let s = a.as_slice_uninit();
-        assert_eq!(s.len(), L);
-        let s = a.as_mut_slice_uninit();
-        assert_eq!(s.len(), L);
+unsafe impl<C, T> TrMaybeUninitSliceMut<T> for C
+where
+    C: BorrowMut<[MaybeUninit<T>]>,
+{
+    fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        self.borrow_mut()
+    }
+}
+
+unsafe impl<T> TrMaybeUninitSlice<T> for [T]
+where
+    T: Copy,
+{
+    fn as_uninit_slice(&self) -> &[MaybeUninit<T>] {
+        let data = self.as_ptr() as *const MaybeUninit<T>;
+        let len = self.len();
+        // SAFETY:
+        // 1. `MaybeUninit<[T]>` 和 `[MaybeUninit<T>]` 具有相同的内存布局。
+        // 2. 我们只是重新解释内存，不改变其内容。
+        unsafe { slice::from_raw_parts(data, len) }
+    }
+}
+
+unsafe impl<T> TrMaybeUninitSliceMut<T> for [T]
+where
+    T: Copy,
+{
+    fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        let data = self.as_mut_ptr() as *mut MaybeUninit<T>;
+        let len = self.len();
+        // SAFETY: 同上，但返回可变引用。
+        // 需要确保在可变借用期间没有其他别名。
+        unsafe { slice::from_raw_parts_mut(data, len) }
     }
 }

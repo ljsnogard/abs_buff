@@ -13,7 +13,9 @@ use anylr::SomeOf;
 use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
-    Demand, buffer::{TrAsBufferMut, TrMaybeUninit}, io::{TrInput, TrOutput},
+    Demand,
+    buffer::{TrAsBufferMut, TrMaybeUninit},
+    io::{TrInput, TrOutput},
 };
 
 /// Represent a sequence of slices who are logically the same array but
@@ -132,7 +134,7 @@ where
         &mut self,
         dst: &mut TyAsBuffMut,
     ) -> usize where TyAsBuffMut: TrAsBufferMut<T> {
-        let dst = dst.as_mut_slice_uninit();
+        let dst = dst.as_mut_buff();
         self.move_items_to_buff(dst)
     }
 }
@@ -204,7 +206,7 @@ where
     where
         TyAsBuff: ?Sized + TrAsBufferMut<T>
     {
-        let src = src.as_mut_slice_uninit();
+        let src = src.as_mut_buff();
         self.move_items_from_buff(src)
     }
 }
