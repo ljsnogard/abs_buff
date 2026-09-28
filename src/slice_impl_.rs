@@ -684,7 +684,7 @@ mod tests_ {
                 MaybeUninit::new(b'b'),
                 MaybeUninit::new(b'c'),
             ];
-            let n = unsafe { child.move_items_from_buff(&mut src.clone()) };
+            let n = unsafe { child.move_items_from_buff(&src.clone()) };
             assert_eq!(n, 3);
             drop(child);
             drop(segm);

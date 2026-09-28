@@ -2,7 +2,7 @@ use core::{
     borrow::BorrowMut,
     cmp,
     mem::MaybeUninit,
-    ops::Try,
+    ops::{Deref, DerefMut, Try},
     pin::Pin,
     ptr,
     slice,
@@ -14,7 +14,7 @@ use gen_mcf2::gen_may_cancel_future;
 
 use crate::{
     Demand,
-    buffer::{TrAsBufferMut, TrMaybeUninit},
+    buffer::{AsBuff, AsBuffMut, TrMaybeUninit},
     io::{TrInput, TrOutput},
 };
 
@@ -130,12 +130,14 @@ where
         c
     }
 
-    fn move_items_to_as_buff<TyAsBuffMut>(
-        &mut self,
-        dst: &mut TyAsBuffMut,
-    ) -> usize where TyAsBuffMut: TrAsBufferMut<T> {
-        let dst = dst.as_mut_buff();
-        self.move_items_to_buff(dst)
+    #[inline]
+    fn move_items_to_as_buff<'f, B>(&'f mut self, dst: B) -> usize
+    where
+        B: Into<AsBuffMut<'f, T>>,
+        T: 'f,
+    {
+        let mut dst: AsBuffMut<'_, T> = dst.into();
+        self.move_items_to_buff(dst.deref_mut())
     }
 }
 
@@ -187,27 +189,25 @@ where
     /// `T` 无需要 drop 的资源（或自行处理 `src` 剩余元素）。
     fn move_items_from_buff(
         &mut self,
-        src: &mut [MaybeUninit<T>],
+        src: &[MaybeUninit<T>],
     ) -> usize {
         let mut c = 0usize;
         while self.least_count() > 0 && c < src.len() {
             let mut segm = self.as_segm_mut();
-            let src_buff = &mut src[c..];
+            let src_buff = &src[c..];
             c += unsafe { segm.move_items_from_buff(src_buff) };
         }
         c
     }
 
     #[inline]
-    fn move_items_from_as_buff<TyAsBuff>(
-        &mut self,
-        src: &mut TyAsBuff,
-    ) -> usize
+    fn move_items_from_as_buff<'f, B>(&'f mut self, src: B) -> usize
     where
-        TyAsBuff: ?Sized + TrAsBufferMut<T>
+        B: Into<AsBuff<'f, T>>,
+        T: 'f,
     {
-        let src = src.as_mut_buff();
-        self.move_items_from_buff(src)
+        let src: AsBuff<'_, T> = src.into();
+        self.move_items_from_buff(src.deref())
     }
 }
 
@@ -559,7 +559,7 @@ where
     ///   drop properly if needed.
     pub unsafe fn move_items_from_buff(
         &mut self,
-        source: &mut [MaybeUninit<T>],
+        source: &[MaybeUninit<T>],
     ) -> usize {
         let dst_size = self.least_count();
         let src_size = source.len();
@@ -569,10 +569,8 @@ where
         };
         let dst = self.buffer_[self.offset_..self.offset_ + count].as_ptr()
             as *mut MaybeUninit<T>;
-        let src = source.borrow_mut()[0..count].as_mut_ptr();
-        unsafe {
-            ptr::copy_nonoverlapping(src, dst, count);
-        }
+        let src = source[0..count].as_ptr();
+        unsafe { ptr::copy_nonoverlapping(src, dst, count) };
         self.offset_ += count;
         count
     }
@@ -1226,14 +1224,14 @@ mod tests_ {
         );
 
         // 1st borrow: 8 slots; receive 8 items.
-        let mut src1: Vec<MaybeUninit<u64>> =
+        let src1: Vec<MaybeUninit<u64>> =
             (0..8).map(MaybeUninit::new).collect();
         {
             let mut child = segm
                 .take_segm_mut(&Demand::less_than(8))
                 .expect("first take must succeed");
             assert_eq!(child.least_count(), 8);
-            let n = unsafe { child.move_items_from_buff(&mut src1) };
+            let n = unsafe { child.move_items_from_buff(&src1) };
             assert_eq!(n, 8);
             assert_eq!(child.least_count(), 0);
         }
@@ -1241,14 +1239,14 @@ mod tests_ {
 
         // 2nd borrow: demand exceeds what is left → the child is exactly the
         // remaining free space, which starts right after the first 8 items.
-        let mut src2: Vec<MaybeUninit<u64>> =
+        let src2: Vec<MaybeUninit<u64>> =
             (10..20).map(MaybeUninit::new).collect();
         {
             let mut child = segm
                 .take_segm_mut(&Demand::less_than(LEN))
                 .expect("second take must succeed");
             assert_eq!(child.least_count(), LEN - 8);
-            let n = unsafe { child.move_items_from_buff(&mut src2) };
+            let n = unsafe { child.move_items_from_buff(&src2) };
             assert_eq!(n, 10);
         }
         assert_eq!(segm.least_count(), LEN - 18);
@@ -1272,11 +1270,11 @@ mod tests_ {
         );
 
         // Round 1: receive 6 items.
-        let mut src1: Vec<MaybeUninit<u8>> =
+        let src1: Vec<MaybeUninit<u8>> =
             (1..=6).map(MaybeUninit::new).collect();
         {
             let mut child = segm.as_segm_mut();
-            let n = unsafe { child.move_items_from_buff(&mut src1) };
+            let n = unsafe { child.move_items_from_buff(&src1) };
             assert_eq!(n, 6);
             // The child's own view now starts at slot 6.
             let slots = child.iter_slices_mut().expect("non-empty");
@@ -1285,11 +1283,11 @@ mod tests_ {
         assert_eq!(segm.least_count(), LEN - 6);
 
         // Round 2: the rest.
-        let mut src2: Vec<MaybeUninit<u8>> =
+        let src2: Vec<MaybeUninit<u8>> =
             (7..=16).map(MaybeUninit::new).collect();
         {
             let mut child = segm.as_segm_mut();
-            let n = unsafe { child.move_items_from_buff(&mut src2) };
+            let n = unsafe { child.move_items_from_buff(&src2) };
             assert_eq!(n, 10);
             assert_eq!(child.least_count(), 0);
         }

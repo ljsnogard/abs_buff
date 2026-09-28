@@ -4,8 +4,8 @@ mod state_;
 
 mod segm_;
 
-pub use as_buff_::{TrAsBuffer, TrAsBufferMut};
-pub use buff_::{TrMaybeUninit, TrMaybeUninitSlice, TrMaybeUninitSliceMut};
+pub use as_buff_::{AsBuff, AsBuffMut};
+pub use buff_::TrMaybeUninit;
 pub use state_::{TrConsumerState, TrProducerState};
 pub use segm_::{
     SegmMut, SegmReclaim, SegmRef,
