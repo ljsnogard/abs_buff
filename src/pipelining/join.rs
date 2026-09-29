@@ -57,7 +57,7 @@ where
     }
 }
 
-#[gen_may_cancel_future(PipeIo, pub)]
+#[gen_may_cancel_future(PipeIo, pub, new(pub(crate)))]
 async fn pipe_async_<'f, W, R, T, C>(
     buff_w: &'f mut W,
     buff_r: &'f mut R,

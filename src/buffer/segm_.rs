@@ -768,7 +768,7 @@ where
     }
 }
 
-#[gen_may_cancel_future(SegmRefOutput, pub)]
+#[gen_may_cancel_future(SegmRefOutput, pub, new(pub(crate)))]
 async fn segm_ref_output_async_<'a, 'f, TyData, TyRecl, TyOut, TyTok>(
     segm: &'f mut SegmRef<'a, TyData, TyRecl>,
     output: &'f mut TyOut,
@@ -828,7 +828,7 @@ where
     SomeOf::new_left(c)
 }
 
-#[gen_may_cancel_future(SegmMutInput, pub)]
+#[gen_may_cancel_future(SegmMutInput, pub, new(pub(crate)))]
 async fn segm_mut_input_async_<'a, 'f, TyData, TyRecl, TyInput, TyTok>(
     segm: &'f mut SegmMut<'a, TyData, TyRecl>,
     input: &'f mut TyInput,
