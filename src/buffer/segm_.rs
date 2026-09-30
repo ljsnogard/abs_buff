@@ -85,6 +85,10 @@ where
     /// A `SegmRef<T>` can move items to a `SegmMut<T>`.
     fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, Self::Reclaimer<'f>>;
 
+    // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+    // Provided methods
+    // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
     /// Do a memory copy to the target `SegmMut<T>`.
     ///
     /// The items that are being memory copied will be treated as moved and
@@ -159,6 +163,10 @@ where
     fn take_segm_mut<'f>(&'f mut self, demand: &Demand<usize>) -> Self::TakeSegmMut<'f>;
 
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>>;
+
+    // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+    // Provided methods
+    // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
     /// Do a memory copy to the target `SegmMut<T>`.
     ///
@@ -458,6 +466,27 @@ where
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(factory(buf, reclaim))
     }
+
+    pub fn as_source<F>(&mut self, dump: F) -> usize
+    where
+        F: FnOnce(&[T]) -> usize,
+    {
+        let buf = &self.buffer_[self.offset_..];
+        let len = dump(buf);
+        self.offset_ += len;
+        len
+    }
+
+    pub async fn as_source_async<F, X>(&mut self, dump: F) -> usize
+    where
+        F: FnOnce(&[T]) -> X,
+        X: Future<Output = usize>,
+    {
+        let buf = &self.buffer_[self.offset_..];
+        let len = dump(buf).await;
+        self.offset_ += len;
+        len
+    }
 }
 
 impl<'a, T, R> SegmMut<'a, T, R>
@@ -627,6 +656,27 @@ where
         let buf = &mut self.buffer_[self.offset_..self.offset_ + length];
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(factory(buf, reclaim))
+    }
+
+    pub fn as_target<F>(&mut self, fill: F) -> usize
+    where
+        F: FnOnce(&mut [MaybeUninit<T>]) -> usize,
+    {
+        let buf = &mut self.buffer_[self.offset_..];
+        let len = fill(buf);
+        self.offset_ += len;
+        len
+    }
+
+    pub async fn as_target_async<F, X>(&mut self, fill: F) -> usize
+    where
+        F: FnOnce(&mut [MaybeUninit<T>]) -> X,
+        X: Future<Output = usize>,
+    {
+        let buf = &mut self.buffer_[self.offset_..];
+        let len = fill(buf).await;
+        self.offset_ += len;
+        len
     }
 }
 
