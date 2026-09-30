@@ -15,11 +15,12 @@ use gen_mcf2::gen_may_cancel_future;
 use crate::{
     Demand,
     buffer::{AsBuff, AsBuffMut, TrMaybeUninit},
+    error::TrTaggedError,
     io::{TrInput, TrOutput},
 };
 
-/// Represent a sequence of slices who are logically the same array but
-/// physically not.
+/// Represent a sequence of slices that are logically contiguous but physically
+/// they are divided
 pub trait TrBuffSegmView {
     type SlicesIter<'f>: IntoIterator<Item = &'f [Self::Item]> where Self: 'f;
     type Item: Sized;
@@ -27,13 +28,16 @@ pub trait TrBuffSegmView {
     /// Returns true if no available items to consume, false otherwise.
     fn is_empty(&self) -> bool;
 
-    /// The minimum count of unconsumed items. For a segment view that
-    /// has only ONE PIECE, this is the unconsumed item count. For those
-    /// have more than once slice, this is the unconsumed item count for
-    /// the first slice.
+    /// The minimum count of unconsumed items. For a segment view that has only
+    /// ONE PIECE, this is the unconsumed item count. For those views grouped
+    /// by more than one slice, this is the unconsumed item count of the first
+    /// available slice.
     fn least_count(&self) -> usize;
 
     /// Iterate the unconsumed parts of the segment slice by slice.
+    ///
+    /// This is for viewing the content of the segment without actually
+    /// consuming the items in it.
     fn iter_slices(&self) -> Self::SlicesIter<'_>;
 }
 
@@ -143,6 +147,19 @@ where
         let mut dst: AsBuffMut<'_, T> = dst.into();
         self.move_items_to_buff(dst.deref_mut())
     }
+
+    #[inline]
+    fn move_items_into_output_async<'f, TyOutput>(
+        &'f mut self,
+        output: &'f mut TyOutput,
+        demand: &'f Demand<usize>,
+    ) -> SegmRefMoveItemsIntoOutputAsync<'a, 'f, 'f, Self, T, TyOutput>
+    where
+        TyOutput: TrOutput<T>,
+        Self: Sized,
+    {
+        SegmRefMoveItemsIntoOutputAsync::new(self, output, demand)
+    }
 }
 
 /// A buffer that its data is organized with one or more slices mut.
@@ -216,6 +233,19 @@ where
     {
         let src: AsBuff<'_, T> = src.into();
         self.move_items_from_buff(src.deref())
+    }
+
+    #[inline]
+    fn move_items_from_input_async<'f, TyInput>(
+        &'f mut self,
+        input: &'f mut TyInput,
+        demand: &'f Demand<usize>,
+    ) -> SegmMutMoveItemsFromInputAsync<'a, 'f, 'f, Self, T, TyInput>
+    where
+        TyInput: TrInput<T>,
+        Self: Sized,
+    {
+        SegmMutMoveItemsFromInputAsync::new(self, input, demand)
     }
 }
 
@@ -466,27 +496,6 @@ where
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(factory(buf, reclaim))
     }
-
-    pub fn as_source<F>(&mut self, dump: F) -> usize
-    where
-        F: FnOnce(&[T]) -> usize,
-    {
-        let buf = &self.buffer_[self.offset_..];
-        let len = dump(buf);
-        self.offset_ += len;
-        len
-    }
-
-    pub async fn as_source_async<F, X>(&mut self, dump: F) -> usize
-    where
-        F: FnOnce(&[T]) -> X,
-        X: Future<Output = usize>,
-    {
-        let buf = &self.buffer_[self.offset_..];
-        let len = dump(buf).await;
-        self.offset_ += len;
-        len
-    }
 }
 
 impl<'a, T, R> SegmMut<'a, T, R>
@@ -656,27 +665,6 @@ where
         let buf = &mut self.buffer_[self.offset_..self.offset_ + length];
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
         Option::Some(factory(buf, reclaim))
-    }
-
-    pub fn as_target<F>(&mut self, fill: F) -> usize
-    where
-        F: FnOnce(&mut [MaybeUninit<T>]) -> usize,
-    {
-        let buf = &mut self.buffer_[self.offset_..];
-        let len = fill(buf);
-        self.offset_ += len;
-        len
-    }
-
-    pub async fn as_target_async<F, X>(&mut self, fill: F) -> usize
-    where
-        F: FnOnce(&mut [MaybeUninit<T>]) -> X,
-        X: Future<Output = usize>,
-    {
-        let buf = &mut self.buffer_[self.offset_..];
-        let len = fill(buf).await;
-        self.offset_ += len;
-        len
     }
 }
 
@@ -933,6 +921,108 @@ where
             // However, if it did enter, we have to know.
             assert!(c > 0usize);
             break;
+        }
+    }
+    SomeOf::new_left(c)
+}
+
+#[gen_may_cancel_future(SegmMutMoveItemsFromInput, pub, new(pub(crate)))]
+async fn segm_mut_move_items_from_input_async_<'a, 'f, TySegm, TyData, TyInput, TyTok>(
+    segm: &'f mut TySegm,
+    input: &'f mut TyInput,
+    demand: &'f Demand<usize>,
+    cancel: TyTok,
+) -> SomeOf<usize, <TyInput as TrInput<TyData>>::Err>
+where
+    'a: 'f,
+    TySegm: TrBuffSegmMut<'a, TyData>,
+    TyData: 'static,
+    TyInput: TrInput<TyData>,
+    TyTok: TrCancellationToken,
+{
+    let mut c = 0usize;
+    let min = demand.min().copied().unwrap_or(1usize);
+    let max = demand.max().copied().unwrap_or(usize::MAX);
+    loop {
+        if cancel.is_cancelled() || segm.is_empty() {
+            break;
+        }
+        let needed_demand = Demand::less_than(max - c);
+        let child_demand = Demand::less_than(segm.least_count());
+        let Option::Some(move_demand) = child_demand.compromise(&needed_demand) else {
+            unreachable!("A compromise should be reached")
+        };
+        let mv_res = segm
+            .as_segm_mut()
+            .move_items_from_input_async(input, &move_demand)
+            .may_cancel_with(cancel.child_token())
+            .await;
+        if let Option::Some(moved) = mv_res.as_ref().pick_left() {
+            c += moved;
+        }
+        if c >= max {
+            break;
+        }
+        let Option::Some(err) = mv_res.pick_right() else {
+            continue
+        };
+        if err.err_tag().should_terminate() {
+            if c >= min {
+                break;
+            } else {
+                return SomeOf::new_both(c, err);
+            }
+        }
+    }
+    SomeOf::new_left(c)
+}
+
+#[gen_may_cancel_future(SegmRefMoveItemsIntoOutput, pub, new(pub(crate)))]
+async fn segm_ref_move_items_into_output_async_<'a, 'f, TySegm, TyData, TyOutput, TyTok>(
+    segm: &'f mut TySegm,
+    output: &'f mut TyOutput,
+    demand: &'f Demand<usize>,
+    cancel: TyTok,
+) -> SomeOf<usize, <TyOutput as TrOutput<TyData>>::Err>
+where
+    'a: 'f,
+    TySegm: TrBuffSegmRef<'a, TyData>,
+    TyData: 'static,
+    TyOutput: TrOutput<TyData>,
+    TyTok: TrCancellationToken,
+{
+    let mut c = 0usize;
+    let min = demand.min().copied().unwrap_or(1usize);
+    let max = demand.max().copied().unwrap_or(usize::MAX);
+    loop {
+        if cancel.is_cancelled() || segm.is_empty() {
+            break;
+        }
+        let needed_demand = Demand::less_than(max - c);
+        let child_demand = Demand::less_than(segm.least_count());
+        let Option::Some(move_demand) = child_demand.compromise(&needed_demand) else {
+            unreachable!("A compromise should be reached")
+        };
+        let mv_res = segm
+            .as_segm_ref()
+            .move_items_to_output_async(output, &move_demand)
+            .may_cancel_with(cancel.child_token())
+            .await;
+        if let Option::Some(moved) = mv_res.as_ref().pick_left() {
+            c += moved;
+        }
+        if c >= max {
+            break;
+        }
+        let Option::Some(err) = mv_res.pick_right() else {
+            continue
+        };
+        if err.err_tag().should_terminate() {
+            if c >= min {
+                break;
+            } else {
+                return SomeOf::new_both(c, err);
+            }
         }
     }
     SomeOf::new_left(c)
