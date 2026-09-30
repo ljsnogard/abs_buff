@@ -70,23 +70,26 @@ where
     where
         Self: 'f;
 
-    /// Take a slice starting from the beginning of the unconsumed part, length
-    /// suggested by the demand argument. Will reduce the length of the segment
-    /// when the taken slice drops.
-    ///
-    /// The amount of the reducing will be the size of taken slice no matter if
-    /// the items in it are actually moved or not. No drop. So this may leak.
     type TakeSegmRef<'f>: Try<Output: TrBuffSegmRef<'f, T>>
     where
         Self: 'f;
 
+    /// Take a slice starting from the beginning of the unconsumed part, length
+    /// suggested by the demand argument. Will reduce the length of actually
+    /// consumed.
     fn take_segm_ref<'f>(
         &'f mut self,
         demand: &Demand<usize>,
     ) -> Self::TakeSegmRef<'f>;
 
-    /// To end the evaluation of recursive downcast from TrBuffSegmRef.
-    /// A `SegmRef<T>` can move items to a `SegmMut<T>`.
+    /// Get the first part of contiguous memory as a child segment.
+    ///
+    /// To end the evaluation of recursive downcast from TrBuffSegmRef, this
+    /// returns a `SegmRef<T>` that contains only one contiguous memory, and
+    /// can move items to a `SegmMut<T>` or any other target supported.
+    ///
+    /// Moving items out of the segment will effectively reducing the length of
+    /// super segment.
     fn as_segm_ref<'f>(&'f mut self) -> SegmRef<'f, T, Self::Reclaimer<'f>>;
 
     // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -168,17 +171,21 @@ where
     Self: TrBuffSegmView<Item: TrMaybeUninit<Inner = T>>,
 {
     type Reclaimer<'f>: TrReclaim where Self: 'f;
-
-    /// Take a slice starting from the beginning of the unconsumed part, length
-    /// suggested by the demand argument. Will reduce the length of the segment
-    /// when the taken slice drops.
-    ///
-    /// The amount of the reducing will be the size of taken slice no matter if
-    /// the items in it are actually moved or not. No drop. So this may leak.
     type TakeSegmMut<'f>: Try<Output: TrBuffSegmMut<'f, T>> where Self: 'f;
 
+    /// Take a slice starting from the beginning of the unconsumed part, length
+    /// suggested by the demand argument. Will reduce the length of actually
+    /// consumed.
     fn take_segm_mut<'f>(&'f mut self, demand: &Demand<usize>) -> Self::TakeSegmMut<'f>;
 
+    /// Get the first part of contiguous memory as a child segment.
+    ///
+    /// To end the evaluation of recursive downcast from TrBuffSegmRef, this
+    /// returns a `SegmRef<T>` that contains only one contiguous memory, and
+    /// can move items from a `SegmRef<T>` or any other source supported.
+    ///
+    /// Moving items into the segment will effectively reducing the length of
+    /// super segment.
     fn as_segm_mut<'f>(&'f mut self) -> SegmMut<'f, T, Self::Reclaimer<'f>>;
 
     // -- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
