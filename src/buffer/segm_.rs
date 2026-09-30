@@ -476,7 +476,7 @@ where
         if c == 0usize {
             return Option::None;
         };
-        let available = Demand::less_than(c);
+        let available = Demand::no_more_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
         let dst = &self.buffer_[self.offset_..self.offset_ + max_len];
@@ -646,7 +646,7 @@ where
         if c == 0usize {
             return Option::None;
         };
-        let available = Demand::less_than(c);
+        let available = Demand::no_more_than(c);
         let agreement = demand.compromise(&available)?;
         let max_len = agreement.max()?;
         let dst = &mut self.buffer_[self.offset_..self.offset_ + max_len];
@@ -828,14 +828,13 @@ where
 {
     let buff = &segm.buffer_[segm.offset_..];
     let size = buff.len();
-    let Option::Some(compromised) = demand.compromise(&Demand::less_than(size))
+    let Option::Some(compromised) = demand.compromise(&Demand::no_more_than(size))
     else {
         return SomeOf::new_left(0usize);
     };
     let Option::Some(max) = compromised.max() else {
         unreachable!()
     };
-    let max = *max;
     debug_assert!(max <= size);
     let mut c = 0usize;
     loop {
@@ -888,14 +887,13 @@ where
 {
     let buff = &mut segm.buffer_[segm.offset_..];
     let size = buff.len();
-    let Option::Some(compromised) = demand.compromise(&Demand::less_than(size))
+    let Option::Some(compromised) = demand.compromise(&Demand::no_more_than(size))
     else {
         return SomeOf::new_left(0usize);
     };
     let Option::Some(max) = compromised.max() else {
         unreachable!()
     };
-    let max = *max;
     debug_assert!(max <= size);
     let mut c = 0usize;
     loop {
@@ -948,14 +946,14 @@ where
     TyTok: TrCancellationToken,
 {
     let mut c = 0usize;
-    let min = demand.min().copied().unwrap_or(1usize);
-    let max = demand.max().copied().unwrap_or(usize::MAX);
+    let min = demand.min().unwrap_or(1usize);
+    let max = demand.max().unwrap_or(usize::MAX);
     loop {
         if cancel.is_cancelled() || segm.is_empty() {
             break;
         }
-        let needed_demand = Demand::less_than(max - c);
-        let child_demand = Demand::less_than(segm.least_count());
+        let needed_demand = Demand::no_more_than(max - c);
+        let child_demand = Demand::no_more_than(segm.least_count());
         let Option::Some(move_demand) = child_demand.compromise(&needed_demand) else {
             unreachable!("A compromise should be reached")
         };
@@ -999,14 +997,14 @@ where
     TyTok: TrCancellationToken,
 {
     let mut c = 0usize;
-    let min = demand.min().copied().unwrap_or(1usize);
-    let max = demand.max().copied().unwrap_or(usize::MAX);
+    let min = demand.min().unwrap_or(1usize);
+    let max = demand.max().unwrap_or(usize::MAX);
     loop {
         if cancel.is_cancelled() || segm.is_empty() {
             break;
         }
-        let needed_demand = Demand::less_than(max - c);
-        let child_demand = Demand::less_than(segm.least_count());
+        let needed_demand = Demand::no_more_than(max - c);
+        let child_demand = Demand::no_more_than(segm.least_count());
         let Option::Some(move_demand) = child_demand.compromise(&needed_demand) else {
             unreachable!("A compromise should be reached")
         };
@@ -1076,7 +1074,7 @@ mod tests_ {
         // 1st borrow: exactly 10 items, starting at the beginning.
         {
             let mut child = segm
-                .take_segm_ref(&Demand::less_than(10))
+                .take_segm_ref(&Demand::no_more_than(10))
                 .expect("first take must succeed");
             assert_eq!(child.least_count(), 10);
             let slice = child.iter_slices().expect("child must not be empty");
@@ -1102,7 +1100,7 @@ mod tests_ {
         // the rest — which is the next content to consume.
         {
             let mut child = segm
-                .take_segm_ref(&Demand::less_than(LEN))
+                .take_segm_ref(&Demand::no_more_than(LEN))
                 .expect("second take must succeed");
             assert_eq!(child.least_count(), LEN - 10);
             let slice = child.iter_slices().expect("non-empty");
@@ -1123,7 +1121,7 @@ mod tests_ {
         // 3rd borrow: only peek, do not consume.
         {
             let child = segm
-                .take_segm_ref(&Demand::less_than(LEN))
+                .take_segm_ref(&Demand::no_more_than(LEN))
                 .expect("third take must succeed");
             assert_eq!(child.least_count(), LEN - 30);
             let slice = child.iter_slices().expect("non-empty");
@@ -1299,7 +1297,7 @@ mod tests_ {
         {
             let src_child = src.as_segm_ref();
             let mut dst_child = dst
-                .take_segm_mut(&Demand::less_than(8))
+                .take_segm_mut(&Demand::no_more_than(8))
                 .expect("dst take must succeed");
             let n = src_child.clone_items_to_segm(&mut dst_child);
             assert_eq!(n, 8);
@@ -1316,7 +1314,7 @@ mod tests_ {
         {
             let src_child = src.as_segm_ref();
             let mut dst_child = dst
-                .take_segm_mut(&Demand::less_than(8))
+                .take_segm_mut(&Demand::no_more_than(8))
                 .expect("dst take must succeed");
             let n = src_child.clone_items_to_segm(&mut dst_child);
             assert_eq!(n, 4);
@@ -1375,7 +1373,7 @@ mod tests_ {
             (0..8).map(MaybeUninit::new).collect();
         {
             let mut child = segm
-                .take_segm_mut(&Demand::less_than(8))
+                .take_segm_mut(&Demand::no_more_than(8))
                 .expect("first take must succeed");
             assert_eq!(child.least_count(), 8);
             let n = unsafe { child.move_items_from_buff(&src1) };
@@ -1390,7 +1388,7 @@ mod tests_ {
             (10..20).map(MaybeUninit::new).collect();
         {
             let mut child = segm
-                .take_segm_mut(&Demand::less_than(LEN))
+                .take_segm_mut(&Demand::no_more_than(LEN))
                 .expect("second take must succeed");
             assert_eq!(child.least_count(), LEN - 8);
             let n = unsafe { child.move_items_from_buff(&src2) };
@@ -1463,7 +1461,7 @@ mod tests_ {
 
         {
             let mut child = segm
-                .take_segm_mut(&Demand::less_than(8))
+                .take_segm_mut(&Demand::no_more_than(8))
                 .expect("take must succeed");
             let n = child.clone_items_from_buff(&[1usize, 2, 3, 4, 5]);
             assert_eq!(n, 5);
@@ -1504,7 +1502,7 @@ mod tests_ {
             );
             {
                 let mut child = segm
-                    .take_segm_ref(&Demand::less_than(2))
+                    .take_segm_ref(&Demand::no_more_than(2))
                     .expect("take must succeed");
                 let mut dst = [MaybeUninit::<u8>::uninit(); 2];
                 let n = move_all(&mut child, &mut dst);

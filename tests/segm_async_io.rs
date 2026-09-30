@@ -14,21 +14,33 @@
 //! 返回可重试错误、单次读取限长）只是真实设备的行为参数，用于驱动被测实现内部的
 //! 循环分支，不改变「数据来自真实文件」这一事实。
 //!
-//! # 关于 `Demand` 上界语义的现状说明
+//! # 语义约定：`Demand` 用「起点 + 长度」描述左闭右开区间
 //!
-//! 本 crate 的搬移实现（这四个异步实现与既有的同步搬移实现一脉相承）把
-//! `Demand::max()`——`LessThan(u)` / `Range(_, u)` 的**开区间上界**——当作「可搬移量
-//! 的上界含（inclusive）」使用：循环在 `c >= max` 时才停止，且单次只取
-//! `min(remaining, max - c)`。后果是：
+//! `Demand` 表示一组被允许的取值（数量），区间一律是左闭右开的 `[起点, 起点 + 长度)`
+//! 或单边约束；`min()` / `max()` 给出的是**含端点**的约束边界（`None` 表示该侧无约束）：
 //!
-//! * `Demand::less_than(3)` 实际最多可搬 3 个，而按 `Demand` 自身的值集语义
-//!   （`len()` / `RangeBounds` 给出的 `[0, 3)`）只应允许 2 个；
-//! * `Demand::exactly(n)` 在可搬量充足时可能搬 n+1 个（其 `max` 为 `n + 1`）；
-//! * `Demand::exactly(n)` 与「恰好 n 个可用」取交集时，`Demand::compromise` 会走到
-//!   `Demand::between(n, n)` 而 panic。
+//! * `exactly(n)`：恰好 n 个；
+//! * `no_more_than(n)`：最多 n 个；
+//! * `at_least(n)`：至少 n 个；
+//! * `between(a, b)`：a 到 b，两端都含。
 //!
-//! 本组测试按**现状**断言（例如 `less_than(3)` 搬 3 个），并刻意避开「恰好 n 个可用
-//! 配 `exactly(n)`」这一会 panic 的组合；若上界语义将来统一修正，需同步更新此处断言。
+//! 上界是含端点的，所以搬移/读写实现可以直接把 `max()` 当作"最多搬多少"使用，不必再做
+//! `- 1` 修正；实现侧描述"有 size 个可供搬移"时直接写 `no_more_than(size)` 即可。两个
+//! 集合恰好相接（无交集）时 `compromise` 返回 `None` 而不会 panic；取值上限处的需求
+//! （如 `exactly(usize::MAX)`）也能精确表示（内部是起始值 + 长度 1）。
+//!
+//! # 为什么用例里 `no_more_than(n)` 与 `exactly(n)` 都会出现
+//!
+//! 选择依据不是风格，而是"这条用例要覆盖哪段实现"：
+//!
+//! * `no_more_than(n)` 用于表达"最多 n 个 / 能取多少取多少"的语义，它与段自身的
+//!   `no_more_than(size)` 求交后仍落在 `NoMoreThan` 分支上；
+//! * `exactly(n)`（以及 `at_least(n)`）会让 `compromise` 的结果落在 `BaseAndLen`
+//!   （起点 + 长度）上，从而覆盖"起点 + 长度"的长度算术与 `max()` 的换算；
+//!   只用 `no_more_than` 的用例走不到这些路径（`NoMoreThan` 的 `max()` 只是一次取字段）；
+//! * 可用量 < n 时两者**行为不同**：`no_more_than(n)` 会搬走可用的那一部分，而
+//!   `exactly(n)` 的交集为空、一个都不搬——这正是"需求不可满足"与"恰好相等"两个
+//!   用例存在的理由。
 
 // `gen_may_cancel_future` 生成的工厂 trait 以 `impl Trait` 作为关联类型，与
 // `abs_buff_tokio_adapt` 等下游 crate 一样需要显式开启该特性。
@@ -281,15 +293,15 @@ fn read_init_<T: Copy>(src: &[MaybeUninit<T>], n: usize) -> Vec<T> {
 // ---------------------------------------------------------------------------
 
 /// 验证 `SegmRef::move_items_to_output_async` 单步搬移把段内数据按序写入真实文件。
-/// - 测试目标：搬移量取「需求上限」与「段内剩余量」的较小者，并按实际写入量推进段
-///   的已消费量；设备一次写不完时内部继续写，直到写满本次搬移量。
-/// - 测试手段：在 compio 运行时中创建真实输出文件（设备单次写入上限 2 字节，以制造
-///   部分写入），用 5 字节段 `[1, 2, 3, 4, 5]` 连续调用该方法三次，需求均为
-///   `less_than(3)`：前两次段内尚有数据，第三次段已空。
-/// - 判定标准：三次返回的搬移量依次为 3、2、0（第二次受段内剩余量限制）；段剩余量
-///   依次为 2、0、0；第 1 轮因限长 2 而调用设备 2 次（2 字节 + 1 字节）、第 2 轮再调用
-///   1 次、第 3 轮不触碰设备（设备调用总数 3）；设备写入位置为 5；读回的整个文件恰好
-///   为 `[1, 2, 3, 4, 5]`；段 drop 后回收量恰为 5。
+/// - 测试目标：搬移量取「需求允许的最大数量（含端点）」与「段内剩余量」的较小者，并按
+///   实际写入量推进段的已消费量；`exactly(n)` 必须恰好 n 个；需求与可搬量无交集时不搬移；
+///   设备一次写不完时内部继续写。
+/// - 测试手段：在 compio 运行时中创建真实输出文件（单次写入上限 2 字节以制造部分写入），
+///   对 5 字节段 `[1, 2, 3, 4, 5]` 依次调用：`exactly(3)`、`exactly(3)`（此时只剩 2 个）、
+///   `no_more_than(3)`、`no_more_than(3)`（此时段已空）。
+/// - 判定标准：四次返回依次为 3、0、2、0；段剩余量依次为 2、2、0、0；设备调用次数依次为
+///   2、2、3、3（第 1 轮由 2 + 1 两次写入凑满；无交集与空段都不触碰设备）；设备写入
+///   位置为 5；读回的文件恰好为 `[1, 2, 3, 4, 5]`；段 drop 后回收量为 5。
 #[compio::test]
 async fn segm_ref_move_items_to_output_async_writes_prefix_to_file() {
     let path = tmp_path_("ref_step_out");
@@ -303,26 +315,33 @@ async fn segm_ref_move_items_to_output_async_writes_prefix_to_file() {
         SegmReclaim::new(Pin::new(&mut consumed)),
     );
 
-    // 第 1 轮：需求允许 3 个，段内有 5 个 → 搬 3 个（限长 2 时由 2 + 1 两次写入完成）。
-    let demand = Demand::less_than(3);
+    // 第 1 轮：`exactly(3)` 要求恰好 3 个（限长 2 → 由 2 + 1 两次写入完成）。
+    let demand = Demand::exactly(3);
     let res = segm.move_items_to_output_async(&mut output, &demand).await;
-    assert_eq!(left_of_(res, "第 1 轮搬移"), 3);
+    assert_eq!(left_of_(res, "第 1 轮搬移"), 3, "exactly(3) 必须恰好 3 个");
     assert_eq!(segm.least_count(), 2);
     assert_eq!(output.calls_, 2, "限长 2 时应由 2 + 1 两次写入凑满 3 字节");
 
-    // 第 2 轮：需求仍是 3，但段内只剩 2 个 → 只能搬 2 个。
-    let demand = Demand::less_than(3);
+    // 第 2 轮：段内只剩 2 个，`exactly(3)` 与可搬量无交集 → 0 且不触碰设备。
+    let demand = Demand::exactly(3);
     let res = segm.move_items_to_output_async(&mut output, &demand).await;
-    assert_eq!(left_of_(res, "第 2 轮搬移"), 2, "受段内剩余量限制");
+    assert_eq!(left_of_(res, "第 2 轮搬移"), 0, "需求下界 3 > 可搬量 2");
+    assert_eq!(segm.least_count(), 2);
+    assert_eq!(output.calls_, 2, "无交集时不应触碰设备");
+
+    // 第 3 轮：`no_more_than(3)` 允许最多 3 个 → 把剩下的 2 个搬完。
+    let demand = Demand::no_more_than(3);
+    let res = segm.move_items_to_output_async(&mut output, &demand).await;
+    assert_eq!(left_of_(res, "第 3 轮搬移"), 2);
     assert_eq!(segm.least_count(), 0);
     assert_eq!(output.calls_, 3);
 
-    // 第 3 轮：段已空 → 搬 0 个，且不应触碰设备。
-    let demand = Demand::less_than(3);
+    // 第 4 轮：段已空 → 搬 0 个，且不应触碰设备。
+    let demand = Demand::no_more_than(3);
     let res = segm.move_items_to_output_async(&mut output, &demand).await;
-    assert_eq!(left_of_(res, "第 3 轮搬移"), 0, "空段不应搬移任何数据");
-    assert_eq!(output.pos_, 5, "前两轮共写入 5 字节");
-    assert_eq!(output.calls_, 3, "第 3 轮不应触碰设备");
+    assert_eq!(left_of_(res, "第 4 轮搬移"), 0, "空段不应搬移任何数据");
+    assert_eq!(output.pos_, 5, "前三轮共写入 5 字节");
+    assert_eq!(output.calls_, 3, "第 4 轮不应触碰设备");
     drop(segm);
 
     assert_eq!(std::fs::read(&path).expect("读回输出文件"), data);
@@ -333,14 +352,11 @@ async fn segm_ref_move_items_to_output_async_writes_prefix_to_file() {
 /// 验证 `SegmRef::move_items_to_output_async` 在需求与段内可搬移量无交集时不搬移。
 /// - 测试目标：需求与「段内可搬移量」取交集失败（`Demand::compromise` 返回
 ///   `None`）时，方法立即返回 0，且不改动段状态、不触碰输出设备。
-/// - 测试手段：3 字节段配 `Demand::exactly(5)`（需求下界 5 大于段内可搬移量 3），
-///   对真实文件输出调用该方法一次。
-/// - 判定标准：返回值为 0；段剩余量仍为 3；设备写入位置仍为 0，且读回的文件为空；
-///   段 drop 后回收量为 0（段未被消费）。
-///
-/// 注：这里刻意选用「必然无交集」的 `exactly(5)` 对 3 字节段，而不是「恰好 5 个可用」
-/// 对 `exactly(5)`——后者会让 `Demand::compromise` 在 `Demand::between(5, 5)` 处 panic
-/// （见文件头「关于 `Demand` 上界语义的现状说明」），本测试不固化该行为。
+/// - 测试手段：3 字节段，先配 `Demand::exactly(5)`（下界 5 大于可搬量 3），再配
+///   `Demand::at_least(4)`（下界 = 可搬量 + 1，两集合恰好相接），各对真实文件输出调用
+///   一次。
+/// - 判定标准：两次返回值都为 0；段剩余量始终为 3；设备写入位置始终为 0，读回的文件为
+///   空；段 drop 后回收量为 0（段未被消费）。
 #[compio::test]
 async fn segm_ref_move_items_to_output_async_moves_nothing_when_unmeetable() {
     let path = tmp_path_("ref_step_unmeet");
@@ -359,6 +375,13 @@ async fn segm_ref_move_items_to_output_async_moves_nothing_when_unmeetable() {
     assert_eq!(left_of_(res, "需求不可满足时"), 0);
     assert_eq!(segm.least_count(), 3, "需求不可满足时不应消费段");
     assert_eq!(output.pos_, 0, "设备不应收到任何写入");
+
+    // 需求下界 = 可搬量 + 1：两集合恰好相接（交集为空），必须返回 0 而不是 panic。
+    let demand = Demand::at_least(4);
+    let res = segm.move_items_to_output_async(&mut output, &demand).await;
+    assert_eq!(left_of_(res, "恰好相接时"), 0);
+    assert_eq!(segm.least_count(), 3, "恰好相接时也不应消费段");
+    assert_eq!(output.pos_, 0);
     drop(segm);
 
     assert!(
@@ -377,8 +400,8 @@ async fn segm_ref_move_items_to_output_async_moves_nothing_when_unmeetable() {
 /// - 测试目标：按需求上限读取、短读后继续读、EOF 以可终止错误上报，并按实际读入量
 ///   推进段的已写入量。
 /// - 测试手段：输入是内容为 `b"HELLO"`（5 字节）的真实文件，设备的单次读取上限设为
-///   2 字节以制造短读；段有 6 个空位；依次以 `less_than(3)`、`less_than(100)`、
-///   `less_than(100)` 调用该关联函数（方法调用语法优先选中固有实现）。
+///   2 字节以制造短读；段有 6 个空位；依次以 `exactly(3)`、`at_least(0)`（无上界）、
+///   `at_least(0)` 调用该关联函数（方法调用语法优先选中固有实现）。
 /// - 判定标准：第 1 轮搬入 3 字节（内部由 2 + 1 两次短读完成，设备被调用 2 次）且段
 ///   剩余 3；第 2 轮搬入 2 字节并附带 `ReadErrTag::Closing` 错误（设备再被调用 2 次：
 ///   一次读到 2 字节、一次探到 EOF）、段剩余 1；第 3 轮搬入 0 且同样附带 `Closing`
@@ -398,15 +421,15 @@ async fn segm_mut_move_items_from_input_async_fills_slots_from_file() {
         SegmReclaim::new(Pin::new(&mut consumed)),
     );
 
-    // 第 1 轮：需求上限 3 → 由两次短读（2 + 1）凑满。
-    let demand = Demand::less_than(3);
+    // 第 1 轮：`exactly(3)` → 由两次短读（2 + 1）凑满。
+    let demand = Demand::exactly(3);
     let res = segm.move_items_from_input_async(&mut input, &demand).await;
     assert_eq!(left_of_(res, "第 1 轮读取"), 3);
     assert_eq!(segm.least_count(), 3);
     assert_eq!(input.calls_, 2, "限长 2 时应由 2 + 1 两次短读凑满 3 字节");
 
     // 第 2 轮：段内还剩 3 个空位、文件只剩 2 字节 → 搬入 2 个后遇 EOF 报 Closing。
-    let demand = Demand::less_than(100);
+    let demand = Demand::at_least(0);
     let res = segm.move_items_from_input_async(&mut input, &demand).await;
     assert_eq!(res.as_ref().pick_left().copied(), Option::Some(2));
     assert_eq!(
@@ -418,7 +441,7 @@ async fn segm_mut_move_items_from_input_async_fills_slots_from_file() {
     assert_eq!(input.calls_, 4, "第 2 轮：一次读到 2 字节，一次探到 EOF");
 
     // 第 3 轮：文件已到末尾 → 搬入 0 个，段剩余空位数不变。
-    let demand = Demand::less_than(100);
+    let demand = Demand::at_least(0);
     let res = segm.move_items_from_input_async(&mut input, &demand).await;
     assert_eq!(left_of_(res, "第 3 轮读取"), 0);
     assert_eq!(segm.least_count(), 1, "未搬入任何数据，剩余空位不变");
@@ -434,7 +457,7 @@ async fn segm_mut_move_items_from_input_async_fills_slots_from_file() {
 /// - 测试目标：段内可写入量为 0 时，需求取交集得到上限 0，方法立即返回 0，不触碰
 ///   输入设备。
 /// - 测试手段：以 0 长度的堆上数组作为段缓冲，输入设备是内容为 `b"XY"` 的真实文件；
-///   以 `less_than(8)` 调用一次。
+///   以 `no_more_than(8)` 调用一次。
 /// - 判定标准：返回值为 0；段剩余量为 0；设备读取位置仍为 0、设备调用次数为 0
 ///   （完全未被读取）；段 drop 后回收量为 0。
 #[compio::test]
@@ -451,7 +474,7 @@ async fn segm_mut_move_items_from_input_async_moves_nothing_into_full_target() {
         SegmReclaim::new(Pin::new(&mut consumed)),
     );
 
-    let demand = Demand::less_than(8);
+    let demand = Demand::no_more_than(8);
     let res = segm.move_items_from_input_async(&mut input, &demand).await;
     assert_eq!(left_of_(res, "空段读取"), 0);
     assert_eq!(segm.least_count(), 0);
@@ -468,12 +491,12 @@ async fn segm_mut_move_items_from_input_async_moves_nothing_into_full_target() {
 // ---------------------------------------------------------------------------
 
 /// 验证 `TrBuffSegmRef::move_items_into_output_async` 的循环重试与搬移量聚合。
-/// - 测试目标：provided method 循环调用单步搬移，直到段被消费空或达到需求上限；把各
-///   轮搬移量累加后返回；遇到「暂时写不进去」的可重试错误（`WriteErrTag::Stuffed`）
-///   继续重试，而不是把错误抛给调用方。
+/// - 测试目标：provided method 循环调用单步搬移，直到段被消费空或达到需求允许的最大
+///   数量（含端点）；把各轮搬移量累加后返回；遇到「暂时写不进去」的可重试错误
+///   （`WriteErrTag::Stuffed`）继续重试，而不是把错误抛给调用方。
 /// - 测试手段：5 字节段 `[1, 2, 3, 4, 5]` 配真实文件输出设备，设备前 3 次写入返回
-///   `Stuffed`（不落盘），此后正常写入；第 1 次调用需求为 `less_than(3)`，第 2 次为
-///   `at_least(1)`（把剩余搬完），第 3 次在已空的段上再调用一次。
+///   `Stuffed`（不落盘），此后正常写入；第 1 次调用需求为 `exactly(3)`（恰好 3 个），
+///   第 2 次为 `at_least(1)`（把剩余搬完），第 3 次在已空的段上再调用一次。
 /// - 判定标准：三次返回的搬移量依次为 3、2、0；段剩余量依次为 2、0、0；第 1 次调用后
 ///   设备的 3 次可重试错误被循环全部消化（`stalls_left_ == 0`）且随后写入成功；三次
 ///   调用共触碰设备 5 次（4 次属于第 1 次调用、1 次属于第 2 次调用，第 3 次调用不触碰
@@ -492,8 +515,8 @@ async fn tr_buff_segm_ref_move_items_into_output_async_retries_and_aggregates() 
         SegmReclaim::new(Pin::new(&mut consumed)),
     );
 
-    // 第 1 次调用（显式走 trait provided method）：需求上限 3，3 轮重试后写入 3 个。
-    let demand = Demand::less_than(3);
+    // 第 1 次调用（显式走 trait provided method）：需求恰好 3 个，3 轮重试后写入 3 个。
+    let demand = Demand::exactly(3);
     let res = TrBuffSegmRef::move_items_into_output_async(
         &mut segm, &mut output, &demand,
     )
@@ -543,7 +566,8 @@ async fn tr_buff_segm_ref_move_items_into_output_async_retries_and_aggregates() 
 ///   （`ReadErrTag::Drained`）继续重试，遇到可终止的 EOF（`ReadErrTag::Closing`）则在
 ///   满足需求下界的前提下正常结束。
 /// - 测试手段：8 个空位的段配内容为 `b"ABCDEF"`（6 字节）的真实文件输入设备，设备前
-///   2 次读取返回 `Drained`；第 1 次调用需求为 `less_than(3)`，第 2 次为 `at_least(1)`。
+///   2 次读取返回 `Drained`；第 1 次调用需求为 `exactly(3)`（恰好 3 个），第 2 次为
+///   `at_least(1)`。
 /// - 判定标准：两次返回的搬移量依次为 3、3；段剩余量依次为 5、2；第 1 次调用后设备的
 ///   2 次可重试错误被循环全部消化（`stalls_left_ == 0`）；设备共被调用 5 次（2 次重试
 ///   + 1 次真读 + 1 次读到 3 字节 + 1 次探到 EOF），读取位置最终为 6；段 drop 后回收量
@@ -563,8 +587,8 @@ async fn tr_buff_segm_mut_move_items_from_input_async_retries_and_aggregates() {
         SegmReclaim::new(Pin::new(&mut consumed)),
     );
 
-    // 第 1 次调用（显式走 trait provided method）：需求上限 3，2 轮重试后搬入 3 个。
-    let demand = Demand::less_than(3);
+    // 第 1 次调用（显式走 trait provided method）：需求恰好 3 个，2 轮重试后搬入 3 个。
+    let demand = Demand::exactly(3);
     let res = TrBuffSegmMut::move_items_from_input_async(
         &mut segm, &mut input, &demand,
     )
@@ -593,4 +617,60 @@ async fn tr_buff_segm_mut_move_items_from_input_async_retries_and_aggregates() {
     assert_eq!(read_init_(&storage, 6), b"ABCDEF".to_vec());
     assert_eq!(consumed, 6);
     std::fs::remove_file(&path).ok();
+}
+
+// ---------------------------------------------------------------------------
+// 边界：需求与可搬量恰好相等
+// ---------------------------------------------------------------------------
+
+/// 验证「需求与可搬量恰好相等」这一边界：交集是单点集合，必须正好搬 n 个。
+/// - 测试目标：`exactly(n)` 与「恰好 n 个可供搬移」求交得到 `{n}`（内部是起点 n、长度 1），
+///   搬移量恰为 n，且两侧都不需要为凑数多调一次设备。
+/// - 测试手段：输出方向用 3 字节段 + `exactly(3)` 写真实文件；输入方向用恰好 3 个空位的
+///   段 + 内容 3 字节的真实文件 + `exactly(3)`。
+/// - 判定标准：两次搬移量都为 3；段剩余量都为 0；设备都只被调用 1 次；两侧回收量都为 3；
+///   文件内容各自正确。
+#[compio::test]
+async fn exactly_n_meets_exactly_n_available_items() {
+    // -- 输出方向：段内恰好 3 个，需求 exactly(3) --
+    let out_path = tmp_path_("exact_fit_out");
+    let file = File::create(&out_path).await.expect("创建输出文件");
+    let mut output = FileOutput::new_(file, 0, usize::MAX);
+    let data: Vec<u8> = vec![7, 8, 9];
+    let mut out_consumed = 0usize;
+    let mut segm = SegmRef::new(
+        &data[..],
+        SegmReclaim::new(Pin::new(&mut out_consumed)),
+    );
+    let demand = Demand::exactly(3);
+    let res = segm.move_items_to_output_async(&mut output, &demand).await;
+    assert_eq!(left_of_(res, "恰好 3 个可用时"), 3);
+    assert_eq!(segm.least_count(), 0);
+    assert_eq!(output.calls_, 1, "一次写满即可");
+    drop(segm);
+    assert_eq!(std::fs::read(&out_path).expect("读回输出文件"), data);
+    assert_eq!(out_consumed, 3);
+    std::fs::remove_file(&out_path).ok();
+
+    // -- 输入方向：恰好 3 个空位，文件恰好 3 字节，需求 exactly(3) --
+    let in_path = tmp_path_("exact_fit_in");
+    std::fs::write(&in_path, b"XYZ").expect("写入测试夹具");
+    let file = File::open(&in_path).await.expect("打开输入文件");
+    let mut input = FileInput::new_(file, 0, usize::MAX);
+    let mut storage = [MaybeUninit::<u8>::uninit(); 3];
+    let mut in_consumed = 0usize;
+    let mut segm = SegmMut::new(
+        &mut storage[..],
+        SegmReclaim::new(Pin::new(&mut in_consumed)),
+    );
+    let demand = Demand::exactly(3);
+    let res = segm.move_items_from_input_async(&mut input, &demand).await;
+    assert_eq!(left_of_(res, "恰好 3 个空位时"), 3);
+    assert_eq!(segm.least_count(), 0);
+    assert_eq!(input.calls_, 1, "读满需求即止，不会多探一次 EOF");
+    assert_eq!(input.pos_, 3);
+    drop(segm);
+    assert_eq!(read_init_(&storage, 3), b"XYZ".to_vec());
+    assert_eq!(in_consumed, 3);
+    std::fs::remove_file(&in_path).ok();
 }

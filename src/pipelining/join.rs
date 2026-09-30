@@ -83,7 +83,7 @@ where
         if buff_r.consumer_state().is_none_or(|(c, b)| c == 0 && b) {
             return PipeJoinIoResult::RxDrained(c);
         }
-        let r_demand = Demand::less_than(usize::MAX - c);
+        let r_demand = Demand::no_more_than(usize::MAX - c);
         let mut r_res = buff_r
             .read_async(&r_demand)
             .may_cancel_with(cancel.child_token())
@@ -99,7 +99,7 @@ where
                         break;
                     }
                 }
-                let w_demand = Demand::less_than(rx_buf_capacity);
+                let w_demand = Demand::no_more_than(rx_buf_capacity);
                 let mut w_res = buff_w
                     .write_async(&w_demand)
                     .may_cancel_with(cancel.child_token())

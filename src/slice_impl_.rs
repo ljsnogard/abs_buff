@@ -233,9 +233,9 @@ where
         if c == 0 {
             return Option::None;
         }
-        let available = Demand::less_than(c);
+        let available = Demand::no_more_than(c);
         let agreement = demand.compromise(&available)?;
-        let max_len = *agreement.max()?;
+        let max_len = agreement.max()?;
         let data = &Borrow::<[T]>::borrow(&*self.source_)
             [self.offset_..self.offset_ + max_len];
         let reclaim = SegmReclaim::new(Pin::new(&mut self.offset_));
@@ -378,9 +378,9 @@ where
         if c == 0 {
             return Option::None;
         }
-        let available = Demand::less_than(c);
+        let available = Demand::no_more_than(c);
         let agreement = demand.compromise(&available)?;
-        let max_len = *agreement.max()?;
+        let max_len = agreement.max()?;
         let data = &mut BorrowMut::<[T]>::borrow_mut(&mut *self.target_)
             [self.offset_..self.offset_ + max_len];
         let data = unsafe {
@@ -474,12 +474,12 @@ impl<T> TrBuffTryRead<T> for &[T] {
         demand: &Demand<usize>,
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
             return SomeOf::new_right(err);
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         SomeOf::new_left(BorrowedReadSegm::with_limit(self, max_len))
     }
 }
@@ -492,13 +492,13 @@ impl<T> TrBuffRead<T> for &[T] {
         demand: &Demand<usize>,
     ) -> Self::ReadAsync<'f> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(ReadErrTag::Closing),
             ));
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         ReadySegm::new(SomeOf::new_left(BorrowedReadSegm::with_limit(
             self, max_len,
         )))
@@ -524,12 +524,12 @@ impl<T> TrBuffTryRead<T> for &mut [T] {
         demand: &Demand<usize>,
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
             return SomeOf::new_right(err);
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         SomeOf::new_left(BorrowedReadSegm::with_limit(self, max_len))
     }
 }
@@ -542,13 +542,13 @@ impl<T> TrBuffRead<T> for &mut [T] {
         demand: &Demand<usize>,
     ) -> Self::ReadAsync<'f> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(ReadErrTag::Closing),
             ));
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         ReadySegm::new(SomeOf::new_left(BorrowedReadSegm::with_limit(
             self, max_len,
         )))
@@ -574,12 +574,12 @@ impl<T> TrBuffTryWrite<T> for &mut [T] {
         demand: &Demand<usize>,
     ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(WriteErrTag::Closing);
             return SomeOf::new_right(err);
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         SomeOf::new_left(BorrowedWriteSegm::with_limit(self, max_len))
     }
 }
@@ -594,13 +594,13 @@ impl<T> TrBuffWrite<T> for &mut [T] {
         demand: &Demand<usize>,
     ) -> Self::WriteAsync<'f> {
         let len = self.len();
-        let min_len = demand.min().copied().unwrap_or(0);
+        let min_len = demand.min().unwrap_or(0);
         if len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(WriteErrTag::Closing),
             ));
         }
-        let max_len = demand.max().copied();
+        let max_len = demand.max();
         ReadySegm::new(SomeOf::new_left(BorrowedWriteSegm::with_limit(
             self, max_len,
         )))
@@ -622,7 +622,7 @@ mod tests_ {
     fn read_borrowed_slice_advances_like_std() {
         let mut data: &[u8] = b"hello";
 
-        let demand = Demand::less_than(5);
+        let demand = Demand::no_more_than(5);
         let mut segm = data
             .try_read(&demand)
             .pick_left()
@@ -647,7 +647,7 @@ mod tests_ {
         let mut storage = [1u8, 2, 3, 4];
         let mut data: &mut [u8] = &mut storage;
 
-        let demand = Demand::less_than(4);
+        let demand = Demand::no_more_than(4);
         let mut segm = data
             .try_read(&demand)
             .pick_left()
@@ -673,7 +673,7 @@ mod tests_ {
         let mut storage = [0u8; 5];
         {
             let mut data: &mut [u8] = &mut storage;
-            let demand = Demand::less_than(5);
+            let demand = Demand::no_more_than(5);
             let mut segm = data
                 .try_write(&demand)
                 .pick_left()
