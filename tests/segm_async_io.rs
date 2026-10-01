@@ -674,3 +674,79 @@ async fn exactly_n_meets_exactly_n_available_items() {
     assert_eq!(in_consumed, 3);
     std::fs::remove_file(&in_path).ok();
 }
+
+// ---------------------------------------------------------------------------
+// 边界：空需求（取值集合为空集）
+// ---------------------------------------------------------------------------
+
+/// 验证空需求（`less_than(0)`）在两个 provided method 上都"一个都不搬"。
+/// - 测试目标：`Demand::less_than(0)` 的取值集合是空集，其 `min()` / `max()` 都是
+///   `None`；聚合循环不能把这一对 `None` 按"至少 1 个、无上界"的缺省解释处理，否则会
+///   无视需求把段内数据全部搬走。
+/// - 测试手段：输出方向用 3 字节段配真实文件输出设备、输入方向用 3 个空位的段配内容
+///   `b"XYZ"` 的真实文件输入设备，两边都以 `less_than(0)` 调用对应的 provided method。
+/// - 判定标准：两次返回的搬移量都是 0；段剩余量不变（3 / 3）；两个设备一次都没被调用
+///   （`calls_ == 0`、`pos_ == 0`）；输出文件为空、输入文件未被读取；两侧回收量都为 0。
+#[compio::test]
+async fn empty_demand_moves_nothing() {
+    let demand = Demand::less_than(0);
+    assert!(demand.is_empty(), "less_than(0) 应当是空需求");
+    assert_eq!(
+        (demand.min(), demand.max()),
+        (Option::None, Option::None),
+        "空集的 min/max 都是 None，这正是必须显式判空的原因"
+    );
+
+    // -- 输出方向：TrBuffSegmRef::move_items_into_output_async --
+    let out_path = tmp_path_("empty_out");
+    let file = File::create(&out_path).await.expect("创建输出文件");
+    let mut output = FileOutput::new_(file, 0, usize::MAX);
+    let data: Vec<u8> = vec![1, 2, 3];
+    let mut out_consumed = 0usize;
+    let mut out_segm = SegmRef::new(
+        &data[..],
+        SegmReclaim::new(Pin::new(&mut out_consumed)),
+    );
+
+    let res = TrBuffSegmRef::move_items_into_output_async(
+        &mut out_segm, &mut output, &demand,
+    )
+    .await;
+    assert_eq!(left_of_(res, "空需求（输出方向）"), 0);
+    assert_eq!(out_segm.least_count(), 3, "空需求不应消费段");
+    assert_eq!(output.calls_, 0, "空需求不应触碰输出设备");
+    assert_eq!(output.pos_, 0);
+    drop(out_segm);
+
+    assert!(
+        std::fs::read(&out_path).expect("读回输出文件").is_empty(),
+        "文件应保持为空"
+    );
+    assert_eq!(out_consumed, 0);
+    std::fs::remove_file(&out_path).ok();
+
+    // -- 输入方向：TrBuffSegmMut::move_items_from_input_async --
+    let in_path = tmp_path_("empty_in");
+    std::fs::write(&in_path, b"XYZ").expect("写入测试夹具");
+    let file = File::open(&in_path).await.expect("打开输入文件");
+    let mut input = FileInput::new_(file, 0, usize::MAX);
+    let mut storage = [MaybeUninit::<u8>::uninit(); 3];
+    let mut in_consumed = 0usize;
+    let mut in_segm = SegmMut::new(
+        &mut storage[..],
+        SegmReclaim::new(Pin::new(&mut in_consumed)),
+    );
+
+    let res = TrBuffSegmMut::move_items_from_input_async(
+        &mut in_segm, &mut input, &demand,
+    )
+    .await;
+    assert_eq!(left_of_(res, "空需求（输入方向）"), 0);
+    assert_eq!(in_segm.least_count(), 3, "空需求不应写入段");
+    assert_eq!(input.calls_, 0, "空需求不应触碰输入设备");
+    assert_eq!(input.pos_, 0);
+    drop(in_segm);
+
+    assert_eq!(in_consumed, 0);
+    std::fs::remove_file(&in_path).ok();
+}

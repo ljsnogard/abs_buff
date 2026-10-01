@@ -1,97 +1,49 @@
-use core::{cmp, ops::{Bound, RangeBounds}};
+use core::{
+    cmp,
+    ops::{Bound, RangeBounds},
+};
+
+use funty::{Integral, Unsigned};
+
+/// `Demand` 中「差值 / 区间长度」所在的类型：即 `abs_diff` 的返回类型。
+///
+/// 单独起名是为了在类型层面把「一个取值」与「两个取值的差」区分开：`BaseAndLen`
+/// 的第一个字段是取值，第二个字段是差值。`Demand` 只接受无符号整数，因此对实际
+/// 用到的 `T`，`DiffT<T>` 与 `T` 同型。
+///
+/// ## Example
+/// ```
+/// use abs_buff::{Demand, DiffT};
+///
+/// // {3, ..., 8} 共 6 个取值。
+/// let count: DiffT<usize> = Demand::between(3usize, 8).len();
+/// assert_eq!(count, 6);
+/// ```
+pub type DiffT<T> = <T as Integral>::Unsigned;
 
 /// 描述一次操作可接受的「数量」范围。
 ///
-/// 取值集合一律是左闭右开区间或单边约束（见 [`DemandRange`] 的说明），`min()` / `max()`
-/// 给出**含端点**的约束边界：
+/// 取值集合一律是左闭右开区间或单边约束，`min()` / `max()` 给出**含端点**的约束边界：
 ///
 /// * [`Demand::exactly`]：恰好 n 个；
 /// * [`Demand::no_more_than`]：最多 n 个（含端点）；
 /// * [`Demand::at_least`]：至少 n 个；
-/// * [`Demand::between`]：a 到 b（两端都含）。
+/// * [`Demand::between`]：a 到 b（两端都含）；
+/// * [`Demand::less_than`]：严格小于 n 个。
+///
+/// 取值集合允许是**空集**（目前只有 `less_than(0)` 会构造出它）：空集的 `min()` /
+/// `max()` 都返回 `None`、`len()` 返回 0、[`Demand::is_empty`] 返回 `true`、与任何
+/// 需求求交都返回 `None`。消费侧若要把「空需求」当成「搬 0 个」，必须显式调用
+/// `is_empty()`——`min()` / `max()` 的 `None` 承载不了这一区别。
 #[derive(Clone, Debug)]
-pub struct Demand<T = usize>(DemandRange<T>);
-
-impl<T> Demand<T> {
-    /// 借用形式的需求视图：把内部的引用而不是值放进 `Demand<&T>`。
-    ///
-    /// 已知局限（见 dev-notes D11）：`min` / `max` 需要 `T: funty::Integral`，而 `&T`
-    /// 不满足该约束，因此当前 `Demand<&T>` 上没有任何可用的访问器，本方法事实上不可用，
-    /// 待与访问器的约束位置一并决策。
-    pub const fn as_ref(&self) -> Demand<&T> {
-        use DemandRange::*;
-
-        match &self.0 {
-            AtLeast(l) => Demand(AtLeast(l)),
-            NoMoreThan(u) => Demand(NoMoreThan(u)),
-            BaseAndLen(l, u) => Demand(BaseAndLen(l, u)),
-        }
-    }
-}
+pub struct Demand<T = usize>(DemandRange<T>)
+where
+    T: Unsigned + Integral<Unsigned = T>;
 
 impl<T> Demand<T>
 where
-    T: funty::Unsigned,
+    T: Unsigned + Integral<Unsigned = T>,
 {
-    /// 构造「只允许一个取值」的需求：集合 `{val}`。
-    ///
-    /// 内部表示为 `[val, val + 1)`（起点 + 长度 1），因此 `val` 取到 `usize::MAX`
-    /// 也能精确表示——这正是用「起点 + 长度」取代「上下限」的动机。
-    ///
-    /// ## Example
-    /// ```
-    /// use abs_buff::Demand;
-    ///
-    /// let a = Demand::exactly(2usize);
-    /// assert_eq!(a.min(), Option::Some(2));
-    /// assert_eq!(a.max(), Option::Some(2));
-    /// assert_eq!(a.len(), 1);
-    ///
-    /// // 取值上限本身同样能精确表示
-    /// let m = Demand::exactly(usize::MAX);
-    /// assert_eq!(m.min(), Option::Some(usize::MAX));
-    /// assert_eq!(m.max(), Option::Some(usize::MAX));
-    /// assert_eq!(m.len(), 1);
-    /// ```
-    pub const fn exactly(val: T) -> Self {
-        Demand(DemandRange::BaseAndLen(val, T::ONE))
-    }
-
-    pub fn less_than(val: T) -> Self {
-        if val > T::ZERO {
-            Demand(DemandRange::NoMoreThan(val - T::ONE))
-        } else {
-            Demand(DemandRange::BaseAndLen(T::ZERO, T::ZERO))
-        }
-    }
-
-    /// 允许的取值个数（取值集合的元素个数）。
-    ///
-    /// * `exactly(2)` → 1（集合 `{2}`）；
-    /// * `no_more_than(2)` → 3（集合 `{0, 1, 2}`）；
-    /// * `between(1, 100)` → 100；
-    /// * `at_least(5)` 的元素个数超出 `usize` 表示范围，按 `usize::MAX` 饱和。
-    ///
-    /// 注意 `at_least(T::MAX)` 只含一个取值 `{T::MAX}`，因此返回 1。
-    /// no_more_than(T::MAX) 的取值数量与数学直觉不同，依旧是 T::MAX
-    pub fn len(&self) -> T {
-        use DemandRange::*;
-
-        match self.0 {
-            // {l, ..., usize::MAX}：个数 = MAX - l + 1，l == 0 时上溢 → 饱和
-            AtLeast(l) =>
-                if l > T::ZERO {
-                    (T::MAX - l) + T::ONE
-                } else {
-                    T::MAX
-                },
-            // {0, ..., u}：个数 = u + 1，u == MAX 时上溢 → 饱和
-            NoMoreThan(u) => if u < T::MAX { u + T::ONE } else { T::MAX },
-            // [b, b + l)：个数就是 l
-            BaseAndLen(_, l) => l,
-        }
-    }
-
     /// 由 [`RangeBounds`] 构造需求；空区间或边界溢出时返回 `Err`（原样带回边界引用）。
     ///
     /// 区间的**开闭语义照 `RangeBounds` 原样**，映射到内部表示时上界会换算成「含端点的
@@ -125,10 +77,11 @@ where
         let end_bound = range.end_bound();
 
         // 起点换算成「含端点的下界」；`Excluded(MAX)` 上溢 → `None` → Err。
+        // 无下界隐含从 0 起算，因此取 `T::ZERO` 而不是 `T::MIN`。
         let start = match start_bound {
             Included(&v) => Option::Some(v),
             Excluded(&v) => v.checked_add(T::ONE),
-            Unbounded => Option::Some(T::MIN),
+            Unbounded => Option::Some(T::ZERO),
         };
         // 上界换算成「含端点的最大取值」：
         // * `None`            —— 无上界（映射为 `AtLeast`）；
@@ -148,15 +101,38 @@ where
             _ => Err((start_bound, end_bound)),
         }
     }
-}
 
-impl<T> Demand<T>
-where
-    T: funty::Integral,
-{
+    /// 构造「只允许一个取值」的需求：集合 `{val}`。
+    ///
+    /// 内部表示为 `[val, val + 1)`（起点 + 长度 1），因此 `val` 取到 `usize::MAX`
+    /// 也能精确表示——这正是用「起点 + 长度」取代「上下限」的动机。
+    ///
+    /// ## Example
+    /// ```
+    /// use abs_buff::Demand;
+    ///
+    /// let a = Demand::exactly(2usize);
+    /// assert_eq!(a.min(), Option::Some(2));
+    /// assert_eq!(a.max(), Option::Some(2));
+    /// assert_eq!(a.len(), 1);
+    ///
+    /// // 取值上限本身同样能精确表示
+    /// let m = Demand::exactly(usize::MAX);
+    /// assert_eq!(m.min(), Option::Some(usize::MAX));
+    /// assert_eq!(m.max(), Option::Some(usize::MAX));
+    /// assert_eq!(m.len(), 1);
+    /// ```
+    pub const fn exactly(val: T) -> Self {
+        Demand(DemandRange::BaseAndLen(val, T::ONE))
+    }
+
     /// 构造「取值落在 `[min(a, b), max(a, b)]`」的需求：**两端都含**，参数顺序无关。
     ///
     /// `a == b` 时退化为只含一个取值的需求（等价于 [`Demand::exactly`]）。
+    ///
+    /// `{T::MIN, ..., T::MAX}`（即全体取值）的开区间上界是 `T::MAX + 1`，长度装不进
+    /// 差值域，因此退化为 [`Demand::at_least`]——两者本来就是同一个集合（见 dev-notes
+    /// 的 D12：集合视角下 `max()` 为 `None`，但 `len()` 饱和为差值域上限）。
     ///
     /// ## Example
     /// ```
@@ -183,9 +159,12 @@ where
         use DemandRange::*;
 
         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-        if hi - lo < T::MAX {
-            Demand(BaseAndLen(lo, hi - lo + T::ONE))
+        // `abs_diff` 天然避免 `hi - lo` 的下溢，并给出「差值域」上的长度。
+        let diff = hi.abs_diff(lo);
+        if diff < T::MAX {
+            Demand(BaseAndLen(lo, diff + T::ONE))
         } else {
+            // 只有 `{T::ZERO, ..., T::MAX}` 会走到这里：`diff + ONE` 恰好越过差值域。
             Demand(AtLeast(lo))
         }
     }
@@ -208,6 +187,8 @@ where
     ///
     /// 搬移/读写实现可以直接把它的 `max()` 当作"最多能搬多少"来用。
     ///
+    /// 注意 `no_more_than(0)` 不是空集：它允许取值 0（`len() == 1`）。
+    ///
     /// ## Example
     /// ```
     /// use abs_buff::Demand;
@@ -221,7 +202,34 @@ where
         Demand(DemandRange::NoMoreThan(val))
     }
 
-    /// 取值集合的**含端点**最小值；`None` 表示"无下界"（隐含从 0 起算）。
+    /// 构造「严格小于 val」的需求：集合 `{0, 1, ..., val - 1}`。
+    ///
+    /// `val == 0` 时取值集合为空集（没有任何数量严格小于 0）：`min()` / `max()` 都是
+    /// `None`、`len()` 为 0、[`Demand::is_empty`] 为 `true`。
+    ///
+    /// ## Example
+    /// ```
+    /// use abs_buff::Demand;
+    ///
+    /// let a = Demand::less_than(3usize);
+    /// assert_eq!(a.min(), Option::None);
+    /// assert_eq!(a.max(), Option::Some(2));
+    /// assert_eq!(a.len(), 3);
+    ///
+    /// // `less_than(0)` 是空集
+    /// let e = Demand::less_than(0usize);
+    /// assert!(e.is_empty());
+    /// assert_eq!(e.len(), 0);
+    /// ```
+    pub fn less_than(val: T) -> Self {
+        if val > T::ZERO {
+            Demand(DemandRange::NoMoreThan(val - T::ONE))
+        } else {
+            Demand(DemandRange::Empty)
+        }
+    }
+
+    /// 取值集合的**含端点**最小值；`None` 表示「无下界」（隐含从 0 起算）或空集。
     ///
     /// 例如 `exactly(2)`、`between(1, 5)`、`at_least(3)` 返回各自的 `Some(下界)`，
     /// 而 `no_more_than(4)` 返回 `None`。
@@ -231,51 +239,42 @@ where
         match self.0 {
             AtLeast(l) => Option::Some(l),
             BaseAndLen(l, _) => Option::Some(l),
+            // `NoMoreThan` 无下界；`Empty` 没有任何取值。
             _ => Option::None,
         }
     }
 
-    /// 取值集合的**含端点**最大值；`None` 表示"无上界"。
+    /// 取值集合的**含端点**最大值；`None` 表示「无上界」或空集。
     ///
     /// 注意这是含端点的最大取值，而不是开区间上界：`exactly(2)` 与 `no_more_than(2)`
     /// 都返回 `Some(2)`。
-    pub fn max(&self) -> Option<T>
-    where
-        T: funty::Integral,
-    {
+    pub fn max(&self) -> Option<T> {
         use DemandRange::*;
 
         match self.0 {
             NoMoreThan(u) => Option::Some(u),
-            // `[b, b + l)` 的最大取值是 `b + l - 1`。先算 `l - 1`（构造保证 `l >= 1`）
-            // 再加 `b`，可避免 `b + l` 上溢——`exactly(usize::MAX)` 正是这一情形。
-            BaseAndLen(b, l) =>
-                if l > T::ZERO && b < T::MAX {
-                    Option::Some(b + (l - T::ONE))
-                } else if b == T::MAX && l == T::ONE {
-                    Option::Some(b)
-                } else {
-                    Option::None
-                },
+            // `[b, b + l)` 的最大取值是 `b + (l - 1)`。`BaseAndLen` 的不变量保证
+            // `l >= 1` 且 `b + (l - 1) <= T::MAX`（`exactly(T::MAX)` 正落在 `T::MAX`），
+            // 因此 `checked_*` 不会在合法状态上失败，只把「越界」显式表达为 `None`。
+            BaseAndLen(b, l) => l.checked_sub(T::ONE).and_then(|d| b.checked_add(d)),
+            // `AtLeast` 无上界；`Empty` 没有任何取值。
             _ => Option::None,
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        use DemandRange::*;
-        match self.0 {
-            // 当 T::ZERO == T::MIN 时是 unsigned, 所以 no_more_than(0) 是空集
-            NoMoreThan(u) => u == T::ZERO && T::ZERO == T::MIN,
-            // 长度为 0 是空集
-            BaseAndLen(_, l) => l == T::ZERO,
-            _ => false,
-        }
+    /// 取值集合是否为空集。
+    ///
+    /// 目前只有 [`Demand::less_than`] 的 `less_than(0)` 会构造出空集。`is_empty()` 与
+    /// `len() == 0` 恒等价：`no_more_than(0)` 允许取值 0，**不是**空集。
+    pub const fn is_empty(&self) -> bool {
+        matches!(self.0, DemandRange::Empty)
     }
 
     /// 求两个需求的交集：同时被两者允许的取值集合；无交集返回 `None`。
     ///
-    /// 两集合**恰好相接**时（例如 `{5}` 与 `{0, ..., 4}`）交集为空，返回 `None`，
-    /// 不会 panic。
+    /// 两集合**恰好相接**时（例如 `{5}` 与 `{0, ..., 4}`）交集为空，返回 `None`；
+    /// 任一操作数是空集时同样返回 `None`（空集与任何集合的交集都是空集），不会
+    /// 返回「长度为 0 的区间」，也不会 panic。
     ///
     /// ## Example
     /// ```
@@ -293,67 +292,68 @@ where
     /// let e = Demand::exactly(5usize);
     /// let u = Demand::no_more_than(4usize);
     /// assert!(e.compromise(&u).is_none());
+    ///
+    /// // ∅ ∩ 任何需求 = ∅
+    /// assert!(Demand::less_than(0usize).compromise(&u).is_none());
     /// ```
-    pub fn compromise(&self, other: &Self) -> Option<Self>
-    where
-        T: Clone,
-    {
+    pub fn compromise(&self, other: &Self) -> Option<Self> {
         use DemandRange::*;
 
-        let lhs = self.0.clone();
-        let rhs = other.0.clone();
+        match (self.0, other.0) {
+            // 空集与任何集合的交集都是空集。
+            (Empty, _) | (_, Empty) => Option::None,
 
-        match (lhs, rhs) {
             // 无上界 + 无上界 → 取较大的下界
-            (AtLeast(a), AtLeast(b)) => {
-                Some(Demand::at_least(cmp::max(a, b)))
-            }
+            (AtLeast(a), AtLeast(b)) => Option::Some(Demand::at_least(cmp::max(a, b))),
 
             // 无下界 + 无下界 → 取较小的上界
             (NoMoreThan(a), NoMoreThan(b)) => {
-                Some(Demand::no_more_than(cmp::min(a, b)))
+                Option::Some(Demand::no_more_than(cmp::min(a, b)))
             }
 
             // `{a, ...} ∩ {0, ..., b} = {a, ..., b}`（`a <= b` 才非空）。两种参数顺序
             // 绑定相同，合并为一个分支。长度 `b - a + 1` 只有 `a == 0 && b == MAX` 会
             // 溢出，而那个集合 `{0, ..., MAX}` 与"无上界"是同一个集合。
             (AtLeast(a), NoMoreThan(b)) | (NoMoreThan(b), AtLeast(a)) if a <= b => {
-                if a == T::MIN && b == T::MAX {
-                    Some(Demand(AtLeast(T::MIN)))
+                if a == T::ZERO && b == T::MAX {
+                    Option::Some(Demand(AtLeast(T::ZERO)))
                 } else {
-                    Some(Demand(BaseAndLen(a, b - a + T::ONE)))
+                    Option::Some(Demand(BaseAndLen(a, b.abs_diff(a) + T::ONE)))
                 }
             }
 
             // `{a, ...} ∩ [c, c + d)`：同样把两种参数顺序合成一个分支。
-            // case 分析集中在一处，且只在 `a > c` 时才做 `a - c` 的减法，
+            // case 分析集中在一处，且只在 `a > c` 时才做减法，
             // 因此不会像 `c - a` 那样在无符号类型上下溢。
             (AtLeast(a), BaseAndLen(c, d)) | (BaseAndLen(c, d), AtLeast(a)) => {
                 if a <= c {
                     // 右侧 `[c, c + d)` 整体落在 `{a, ...}` 内。
-                    Some(Demand(BaseAndLen(c, d)))
-                } else if a - c < d {
-                    // 交集是 `[a, c + d)`，长度 = `d - (a - c)`。
-                    Some(Demand(BaseAndLen(a, d - (a - c))))
+                    Option::Some(Demand(BaseAndLen(c, d)))
                 } else {
-                    // `a >= c + d`：无交集。
-                    None
+                    // 交集是 `[a, c + d)`，长度 = `d - (a - c)`。
+                    let offset = a.abs_diff(c);
+                    if offset < d {
+                        Option::Some(Demand(BaseAndLen(a, d - offset)))
+                    } else {
+                        // `a >= c + d`：无交集。
+                        Option::None
+                    }
                 }
             }
 
             // `{0, ..., b} ∩ [c, c + d) = [c, min(c + d, b + 1))`（`c <= b` 才非空）。
-            // 长度用饱和加法：`b == T::MAX && c == 0` 时真实长度 `MAX + 1` 无法表示，
+            // 长度用饱和加法：`b == MAX && c == 0` 时真实长度 `MAX + 1` 无法表示，
             // 但随后与 `d` 取小，结果仍然正确。
             (NoMoreThan(b), BaseAndLen(c, d)) if c <= b => {
-                Some(Demand(BaseAndLen(
+                Option::Some(Demand(BaseAndLen(
                     c,
-                    cmp::min(d, (b - c).saturating_add(T::ONE)),
+                    cmp::min(d, b.abs_diff(c).saturating_add(T::ONE)),
                 )))
             }
             (BaseAndLen(c, d), NoMoreThan(b)) if c <= b => {
-                Some(Demand(BaseAndLen(
+                Option::Some(Demand(BaseAndLen(
                     c,
-                    cmp::min(d, (b - c).saturating_add(T::ONE)),
+                    cmp::min(d, b.abs_diff(c).saturating_add(T::ONE)),
                 )))
             }
 
@@ -366,58 +366,75 @@ where
                     // 交集起点是 a。
                     // 需要 a 落在 rhs 内：a < c + d
                     // 等价于 a - c < d，且 a >= c 保证 a - c 不会下溢。
-                    if a - c >= d {
-                        return None;
+                    let offset = a.abs_diff(c);
+                    if offset >= d {
+                        return Option::None;
                     }
 
                     // rhs 从 a 开始还剩 d - (a - c) 个元素。
-                    (a, cmp::min(b, d - (a - c)))
+                    (a, cmp::min(b, d - offset))
                 } else {
                     // 交集起点是 c。
                     // 需要 c 落在 lhs 内：c < a + b
                     // 等价于 c - a < b，且 c > a 保证 c - a 不会下溢。
-                    if c - a >= b {
-                        return None;
+                    let offset = c.abs_diff(a);
+                    if offset >= b {
+                        return Option::None;
                     }
                     // lhs 从 c 开始还剩 b - (c - a) 个元素。
-                    (c, cmp::min(d, b - (c - a)))
+                    (c, cmp::min(d, b - offset))
                 };
 
-                if len > T::ZERO {
-                    Some(Demand(BaseAndLen(base, len)))
-                } else {
-                    None
-                }
+                // `BaseAndLen` 的不变量保证 `b, d >= 1`，且上面的 `< d` / `< b` 判断
+                // 保证差值后仍 `>= 1`，因此这里不会构造出长度为 0 的区间。
+                Option::Some(Demand(BaseAndLen(base, len)))
             }
 
-            // 无下界与无下界、无上界与无上界等已在上面覆盖，其余情况无交集
-            _ => None,
+            // 无下界/无上界/空集的各种组合都已在上面覆盖，其余情况无交集
+            // （`NoMoreThan ∩ BaseAndLen` 中 `c > b` 的两种顺序落在这里）。
+            _ => Option::None,
         }
     }
 }
 
-impl<T> RangeBounds<T> for Demand<T>
+impl<T> Demand<T>
 where
-    T: Eq + Ord,
+    T: Unsigned + Integral<Unsigned = T>,
+    DiffT<T>: Into<usize>,
 {
-    fn start_bound(&self) -> Bound<&T> {
-        match &self.0 {
-            DemandRange::AtLeast(x) => Bound::Included(x),
-            DemandRange::NoMoreThan(_) => Bound::Unbounded,
-            DemandRange::BaseAndLen(x, _) => Bound::Included(x),
-        }
-    }
+    /// 允许的取值个数（取值集合的元素个数）。
+    ///
+    /// 返回的是「差值域」上的个数：`exactly(2)` → 1，`no_more_than(2)` → 3，
+    /// `between(1, 100)` → 100，空集 → 0。当集合的元素个数超出差值域时按差值域上限
+    /// 饱和：`at_least(5)` 的元素个数是 `MAX - 5 + 1`（`MAX` 取差值域上限），
+    /// `no_more_than(T::MAX)` 的 `T::MAX + 1` 个取值饱和为 `T::MAX`。
+    ///
+    /// 注意 `at_least(T::MAX)` 只含一个取值 `{T::MAX}`，因此返回 1。
+    ///
+    /// 本方法仅当差值域可以无损转入 `usize` 时才提供（例如 `u8` / `u16` / `usize`），
+    /// 以便调用方直接把它当 `usize` 使用。
+    pub fn len(&self) -> DiffT<T> {
+        use DemandRange::*;
 
-    fn end_bound(&self) -> Bound<&T> {
-        match &self.0 {
-            DemandRange::AtLeast(_) => Bound::Unbounded,
-            // `{0, ..., x}` 的含端点上界就是 `x`，可直接借用。
-            DemandRange::NoMoreThan(x) => Bound::Included(x),
-            // 已知缺陷（需设计决策，见 dev-notes）：`[b, b + len)` 的开区间上界是
-            // `b + len`，它既没有存成字段（`Bound<&T>` 要求返回引用），也可能是
-            // `T::MAX + 1` 而无法用 `T` 表示。因此这里返回的 `Excluded(len)` **不是**
-            // 正确的区间端点，`Demand` 作为 `RangeBounds` 使用时应避免依赖该分支。
-            DemandRange::BaseAndLen(_, x) => Bound::Excluded(x),
+        match self.0 {
+            // {l, ..., MAX}：个数 = MAX - l + 1，l == 0 时上溢 → 饱和
+            AtLeast(l) =>
+                if l > T::ZERO {
+                    T::MAX.abs_diff(l) + T::ONE
+                } else {
+                    T::MAX
+                },
+            // {0, ..., u}：个数 = u + 1，u == MAX 时上溢 → 饱和
+            NoMoreThan(u) =>
+                if u < T::MAX {
+                    u.abs_diff(T::ZERO) + T::ONE
+                } else {
+                    T::MAX
+                },
+            // [b, b + l)：个数就是 l
+            BaseAndLen(_, l) => l,
+            // 空集：一个取值都没有
+            Empty => T::ZERO,
         }
     }
 }
@@ -427,17 +444,26 @@ where
 /// 区间不直接存上下限，而是「起点 + 长度」或单边约束。原因：`exactly(usize::MAX)`
 /// 这类集合的开区间上界是 `usize::MAX + 1`，用 `usize` 存不下；改成「起点 + 长度」后
 /// `{usize::MAX}` 就是 `(usize::MAX, 1)`，可以精确表示。
-#[derive(Clone, Debug)]
-pub(crate) enum DemandRange<T> {
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DemandRange<T>
+where
+    T: Unsigned + Integral<Unsigned = T>,
+{
+    /// 空集：不含任何取值；`min()` / `max()` 都为 `None`。
+    ///
+    /// 单独列一个变体（而不是用「长度为 0 的 `BaseAndLen`」充数）是为了保住
+    /// `BaseAndLen` 的 `len >= 1` 不变量，并让空集的 `min()` 也如实返回 `None`。
+    Empty,
+
     /// `{l, l + 1, ..., T::MAX}`：只有下界，无上界
     AtLeast(T),
 
     /// `{0, 1, ..., u}`：只有上界（含端点），下界隐含为 0
     NoMoreThan(T),
 
-    /// `[base, base + len)`：起点 + 长度；`len >= 1`，空集一律用 `None`/`Err` 表达，
-    /// 不构造长度为 0 的区间
-    BaseAndLen(T, T),
+    /// `[base, base + len)`：起点 + 长度；不变量 `len >= 1`，空集一律用 [`Self::Empty`]
+    /// 表达，不构造长度为 0 的区间
+    BaseAndLen(T, DiffT<T>),
 }
 
 #[cfg(test)]
@@ -531,23 +557,6 @@ mod try_from_usize_range_tests_ {
         assert!(Demand::try_from_usize_range(&OverflowingStart).is_err());
     }
 
-    /// `Demand` 作为 `RangeBounds` 的视图：无约束的一侧必须是 `Unbounded`。
-    /// - 测试目标：`at_least` / `no_more_than` 的 `RangeBounds` 视图要准确（单边约束可以
-    ///   精确表达；`BaseAndLen` 的开区间上界没有存成字段，属已知缺陷，见 dev-notes）。
-    /// - 测试手段：对 `at_least(5)` 与 `no_more_than(7)` 取 `start_bound` / `end_bound`。
-    /// - 判定标准：`at_least(5)` → `[Included(5), ...)` 且上界 `Unbounded`；
-    ///   `no_more_than(7)` → 下界 `Unbounded`、上界 `Included(7)`（含端点 7）。
-    #[test]
-    fn range_bounds_view_is_exact_for_single_sided_demands() {
-        let a = Demand::at_least(5usize);
-        assert!(matches!(a.start_bound(), Bound::Included(&5)));
-        assert!(matches!(a.end_bound(), Bound::Unbounded));
-
-        let n = Demand::no_more_than(7usize);
-        assert!(matches!(n.start_bound(), Bound::Unbounded));
-        assert!(matches!(n.end_bound(), Bound::Included(&7)));
-    }
-
     /// `a..b` / `a..=b` 与 `between` 的等价关系必须成立。
     /// - 测试目标：两条构造路径（区间映射与直接构造）给出同一集合，特别防止把"开区间上界"
     ///   直接当成"含端点上界"塞给 `between`（那会多算一个取值）。
@@ -615,7 +624,7 @@ mod accessor_tests_ {
         assert_eq!(Demand::no_more_than(0usize).len(), 1, "只含 0 这一个取值");
 
         // `{5, ...}`：个数是 MAX - 5 + 1。
-        let a = Demand::at_least(5);
+        let a = Demand::at_least(5usize);
         assert_eq!(
             (a.min(), a.max(), a.len()),
             (Option::Some(5), Option::None, max - 4)
@@ -651,6 +660,109 @@ mod accessor_tests_ {
         // 起点与终点都取上限：必须保留有界表示，`max()` 不能变成"无上界"
         let t = Demand::between(max, max);
         assert_eq!((t.min(), t.max(), t.len()), (Option::Some(max), Option::Some(max), 1));
+    }
+
+    /// 校验「全体取值」`{0, ..., usize::MAX}` 的退化表示，参数顺序无关。
+    /// - 测试目标：该集合的长度是 `MAX + 1`，装不进差值域；`between` 必须退化为"无上界"，
+    ///   而不是让 `diff + 1` 溢出（debug 下 panic、release 下静默变成空集）。
+    /// - 测试手段：`between(0, MAX)`、`between(MAX, 0)` 与 `try_from_usize_range(&(0..=MAX))`。
+    /// - 判定标准：三者的 `(min, max, len)` 都是 `(Some(0), None, MAX)`；只要 `diff < MAX`
+    ///   的集合都保持有界（用 `between(0, MAX - 1)` 对照）。
+    #[test]
+    fn full_range_degenerates_without_overflow() {
+        let max = usize::MAX;
+
+        let full = Demand::between(0, max);
+        assert_eq!((full.min(), full.max(), full.len()), (Option::Some(0), Option::None, max));
+
+        // 参数顺序无关
+        let swapped = Demand::between(max, 0);
+        assert_eq!(
+            (swapped.min(), swapped.max(), swapped.len()),
+            (full.min(), full.max(), full.len())
+        );
+
+        let from_range = Demand::try_from_usize_range(&(0usize..=max)).unwrap();
+        assert_eq!(
+            (from_range.min(), from_range.max(), from_range.len()),
+            (full.min(), full.max(), full.len())
+        );
+
+        // 全集下面一格：长度 `MAX`，仍然是有界表示（`diff + 1 == MAX` 不越界）。
+        let bounded = Demand::between(0, max - 1);
+        assert_eq!(
+            (bounded.min(), bounded.max(), bounded.len()),
+            (Option::Some(0), Option::Some(max - 1), max)
+        );
+    }
+
+    /// 校验 `less_than` 的取值集合：严格小于 `n` 的非负整数。
+    /// - 测试目标：`less_than(n)`（`n > 0`）等价于 `no_more_than(n - 1)`；`less_than(0)`
+    ///   是空集，三个查询必须互相自洽（不能 `len() == 0` 却说非空，也不能假装有取值）。
+    /// - 测试手段：对 `0`、`1`、`7` 读出 `(min, max, len, is_empty)`，并与等价的
+    ///   `no_more_than` 写法比对。
+    /// - 判定标准：`less_than(0)` → `(None, None, 0, true)`；`less_than(1)` →
+    ///   `(None, Some(0), 1, false)`；`less_than(7)` → `(None, Some(6), 7, false)`。
+    #[test]
+    fn less_than_matches_the_value_sets() {
+        let empty = Demand::less_than(0usize);
+        assert_eq!(
+            (empty.min(), empty.max(), empty.len(), empty.is_empty()),
+            (Option::None, Option::None, 0, true)
+        );
+
+        let one = Demand::less_than(1usize);
+        assert_eq!(
+            (one.min(), one.max(), one.len(), one.is_empty()),
+            (Option::None, Option::Some(0), 1, false)
+        );
+        assert_eq!(one.max(), Demand::no_more_than(0usize).max());
+
+        let seven = Demand::less_than(7usize);
+        assert_eq!(
+            (seven.min(), seven.max(), seven.len()),
+            (Option::None, Option::Some(6), 7)
+        );
+        let equiv = Demand::no_more_than(6usize);
+        assert_eq!(
+            (seven.min(), seven.max(), seven.len()),
+            (equiv.min(), equiv.max(), equiv.len())
+        );
+    }
+
+    /// 校验 `is_empty()` 的唯一解释是「取值集合为空」。
+    /// - 测试目标：`no_more_than(0)` 允许取值 0，**不是**空集；`exactly(0)`、
+    ///   `between(0, 0)`、`at_least(0)`、`at_least(usize::MAX)` 同样非空；只有
+    ///   `less_than(0)` 为空集。
+    /// - 测试手段：对上述需求逐一读出 `(is_empty, len)` 并互相比对。
+    /// - 判定标准：`is_empty()` 与 `len() == 0` 恒等价，两个查询不会互相矛盾。
+    ///
+    /// 这里必须写 `len() == 0` 而不是 `is_empty()`：本用例要断言的正是二者的等价关系，
+    /// 若按 `clippy::len_zero` 的建议改成 `is_empty()`，断言会变成同义反复。
+    #[allow(clippy::len_zero)]
+    #[test]
+    fn is_empty_agrees_with_len() {
+        let demands = [
+            Demand::less_than(0usize),
+            Demand::no_more_than(0usize),
+            Demand::exactly(0usize),
+            Demand::between(0usize, 0),
+            Demand::at_least(0usize),
+            Demand::at_least(usize::MAX),
+            Demand::less_than(1usize),
+        ];
+
+        for d in &demands {
+            assert_eq!(
+                d.is_empty(),
+                d.len() == 0,
+                "is_empty 与 len 不自洽：{d:?}"
+            );
+        }
+
+        assert!(Demand::less_than(0usize).is_empty(), "less_than(0) 是空集");
+        assert!(!Demand::no_more_than(0usize).is_empty(), "no_more_than(0) 含取值 0");
+        assert!(!Demand::exactly(0usize).is_empty(), "exactly(0) 含取值 0");
     }
 }
 
@@ -745,6 +857,35 @@ mod compromise_tests_ {
         }
     }
 
+    /// 校验空集参与求交时返回 `None`，而不是"长度为 0 的区间"。
+    /// - 测试目标：∅ ∩ X 必须是 ∅。旧实现会把 `less_than(0)` 与 `no_more_than(n)` 的交集
+    ///   表达成 `BaseAndLen(b, 0)`，消费侧据此取 `max()` 会拿到 `None` 并在
+    ///   `unreachable!()` 处 panic（`buffer::segm` 的搬移实现即如此）。
+    /// - 测试手段：把 `less_than(0)` 与各种需求正反两个方向求交。
+    /// - 判定标准：全部返回 `None`，且不 panic。
+    #[test]
+    fn compromise_with_empty_is_none() {
+        let empty = Demand::less_than(0usize);
+        let others = [
+            Demand::at_least(0usize),
+            Demand::no_more_than(5usize),
+            Demand::exactly(3usize),
+            Demand::between(1usize, 4),
+            Demand::less_than(0usize),
+            Demand::less_than(9usize),
+        ];
+
+        for other in &others {
+            let forward = catch_unwind(AssertUnwindSafe(|| empty.compromise(other)))
+                .unwrap_or_else(|_| panic!("空集求交不应 panic"));
+            assert!(forward.is_none(), "∅ ∩ {other:?} 必须为空集");
+
+            let backward = catch_unwind(AssertUnwindSafe(|| other.compromise(&empty)))
+                .unwrap_or_else(|_| panic!("空集求交不应 panic"));
+            assert!(backward.is_none(), "{other:?} ∩ ∅ 必须为空集");
+        }
+    }
+
     /// 校验 `(min, max, len)` 三者自洽：两侧都有约束时 `len == max - min + 1`。
     /// - 测试目标：用一条不变量覆盖所有构造路径（构造器 + `compromise` + 区间映射），把
     ///   "多算/少算一个取值"这类 off-by-one 一次兜住。
@@ -761,6 +902,7 @@ mod compromise_tests_ {
             Demand::at_least(4usize),
             Demand::no_more_than(6usize),
             Demand::no_more_than(1usize),
+            Demand::less_than(5usize),
         ];
 
         for a in &demands {
@@ -769,6 +911,7 @@ mod compromise_tests_ {
                     continue;
                 };
                 assert_ne!(c.len(), 0, "交集不应是长度 0 的空区间");
+                assert!(!c.is_empty(), "交集不应是空集：{c:?}");
                 if let (Option::Some(lo), Option::Some(hi)) = (c.min(), c.max()) {
                     assert_eq!(
                         c.len(),

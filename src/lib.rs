@@ -24,7 +24,7 @@ mod reader_;
 mod slice_impl_;
 mod writer_;
 
-pub use demand_::Demand;
+pub use demand_::{Demand, DiffT};
 pub use peeker_::{TrBuffPeek, TrBuffTryPeek};
 pub use reader_::{TrBuffRead, TrBuffTryRead};
 /// 立即就绪的 `Future`，产出 `SomeOf<S, E>`；实现 `TrInput` / `TrOutput` 时

@@ -945,6 +945,12 @@ where
     TyInput: TrInput<TyData>,
     TyTok: TrCancellationToken,
 {
+    // 空需求（`less_than(0)`）不允许任何数量：它的 `min()` / `max()` 都是 `None`，
+    // 若按下面的 `unwrap_or` 缺省解释会变成"至少 1 个、无上界"并照常搬移。
+    // 这里显式尊重"空集"语义，一个都不搬。
+    if demand.is_empty() {
+        return SomeOf::new_left(0usize);
+    }
     let mut c = 0usize;
     let min = demand.min().unwrap_or(1usize);
     let max = demand.max().unwrap_or(usize::MAX);
@@ -996,6 +1002,10 @@ where
     TyOutput: TrOutput<TyData>,
     TyTok: TrCancellationToken,
 {
+    // 同 `segm_mut_move_items_from_input_async_`：空需求一个都不搬。
+    if demand.is_empty() {
+        return SomeOf::new_left(0usize);
+    }
     let mut c = 0usize;
     let min = demand.min().unwrap_or(1usize);
     let max = demand.max().unwrap_or(usize::MAX);

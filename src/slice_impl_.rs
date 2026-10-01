@@ -475,7 +475,10 @@ impl<T> TrBuffTryRead<T> for &[T] {
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        // 空需求（`less_than(0)`）的取值集合为空集，任何可用量都满足不了它；
+        // 它的 `min()` / `max()` 都是 `None`，所以必须显式判空，否则会被当成
+        // "至少 0 个、无上界"而借出整段。下面各实现同理。
+        if demand.is_empty() || len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
             return SomeOf::new_right(err);
         }
@@ -493,7 +496,7 @@ impl<T> TrBuffRead<T> for &[T] {
     ) -> Self::ReadAsync<'f> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        if demand.is_empty() || len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(ReadErrTag::Closing),
             ));
@@ -525,7 +528,7 @@ impl<T> TrBuffTryRead<T> for &mut [T] {
     ) -> SomeOf<Self::SegmRef<'f>, Self::Err> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        if demand.is_empty() || len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(ReadErrTag::Closing);
             return SomeOf::new_right(err);
         }
@@ -543,7 +546,7 @@ impl<T> TrBuffRead<T> for &mut [T] {
     ) -> Self::ReadAsync<'f> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        if demand.is_empty() || len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(ReadErrTag::Closing),
             ));
@@ -575,7 +578,7 @@ impl<T> TrBuffTryWrite<T> for &mut [T] {
     ) -> SomeOf<Self::SegmMut<'f>, Self::Err> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        if demand.is_empty() || len == 0 || len < min_len {
             let err = BorrowedSliceError::Empty(WriteErrTag::Closing);
             return SomeOf::new_right(err);
         }
@@ -595,7 +598,7 @@ impl<T> TrBuffWrite<T> for &mut [T] {
     ) -> Self::WriteAsync<'f> {
         let len = self.len();
         let min_len = demand.min().unwrap_or(0);
-        if len == 0 || len < min_len {
+        if demand.is_empty() || len == 0 || len < min_len {
             return ReadySegm::new(SomeOf::new_right(
                 BorrowedSliceError::Empty(WriteErrTag::Closing),
             ));
@@ -694,5 +697,39 @@ mod tests_ {
             assert_eq!(data, [0u8, 0]);
         }
         assert_eq!(&storage[..3], b"abc");
+    }
+
+    /// 验证空需求（`less_than(0)`）会被拒绝，而不是被当成"至少 0 个、无上界"借出整段。
+    /// - 测试目标：空需求的取值集合是空集，任何可用量都满足不了它；它的 `min()` /
+    ///   `max()` 都是 `None`，若只按 `unwrap_or(0)` + `with_limit(None)` 处理，就会把一个
+    ///   不可满足的需求变成"整段都借出去"。
+    /// - 测试手段：`&[u8]` 读源与 `&mut [u8]` 写目标各传入 `Demand::less_than(0)`，
+    ///   取返回结果的右侧错误；随后再传一个正常需求 `no_more_than(1)` 作对照。
+    /// - 判定标准：两次都得到 `BorrowedSliceError::Empty(Closing)`；对照用的正常需求
+    ///   仍能借出段（证明报错来自"空集"这一语义，而不是通路失灵）。
+    #[test]
+    fn empty_demand_is_rejected_by_borrowed_slice() {
+        let demand = Demand::less_than(0);
+        assert!(demand.is_empty(), "less_than(0) 是空集");
+        assert_eq!((demand.min(), demand.max()), (Option::None, Option::None));
+
+        let mut data: &[u8] = b"hello";
+        let err = data
+            .try_read(&demand)
+            .pick_right()
+            .expect("空需求必须报错，而不是借出整段");
+        assert!(matches!(err, BorrowedSliceError::Empty(ReadErrTag::Closing)));
+
+        let mut storage = [0u8; 4];
+        let mut sink: &mut [u8] = &mut storage;
+        let err = sink
+            .try_write(&demand)
+            .pick_right()
+            .expect("空需求必须报错，而不是借出整段");
+        assert!(matches!(err, BorrowedSliceError::Empty(WriteErrTag::Closing)));
+
+        // 对照：非空需求照常借出段。
+        let ok = Demand::no_more_than(1);
+        assert!(data.try_read(&ok).pick_left().is_some());
     }
 }
