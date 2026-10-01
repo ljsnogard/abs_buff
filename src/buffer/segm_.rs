@@ -853,9 +853,7 @@ where
             .may_cancel_with(cancel.child_token())
             .await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
-            if *cc == 0 {
-                return SomeOf::new_left(c);
-            }
+            assert!(*cc > 0 || x.contains_right());
             segm.offset_ += *cc;
             c += cc;
         };
@@ -887,8 +885,8 @@ where
 {
     let buff = &mut segm.buffer_[segm.offset_..];
     let size = buff.len();
-    let Option::Some(compromised) = demand.compromise(&Demand::no_more_than(size))
-    else {
+    let available = Demand::no_more_than(size);
+    let Option::Some(compromised) = demand.compromise(&available) else {
         return SomeOf::new_left(0usize);
     };
     let Option::Some(max) = compromised.max() else {
@@ -912,9 +910,7 @@ where
             .may_cancel_with(cancel.child_token())
             .await;
         if let Option::Some(cc) = x.as_ref().pick_left() {
-            if *cc == 0 {
-                return SomeOf::new_left(c);
-            }
+            assert!(*cc > 0 || x.contains_right());
             segm.offset_ += *cc;
             c += cc;
         };
@@ -969,6 +965,7 @@ where
             .may_cancel_with(cancel.child_token())
             .await;
         if let Option::Some(moved) = mv_res.as_ref().pick_left() {
+            assert!(*moved > 0 || mv_res.contains_right());
             c += moved;
         }
         if c >= max {
@@ -1024,6 +1021,7 @@ where
             .may_cancel_with(cancel.child_token())
             .await;
         if let Option::Some(moved) = mv_res.as_ref().pick_left() {
+            assert!(*moved > 0 || mv_res.contains_right());
             c += moved;
         }
         if c >= max {
